@@ -626,8 +626,9 @@ export default function Dashboard() {
                   {loading ? '...' : formatUGX(financialSummary?.revenue || 0)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {loading ? '...' : `${financialSummary?.orderCount || 0} payments`}
+                  {loading ? '...' : `${financialSummary?.orderCount || 0} delivered orders`}
                 </p>
+                <p className="text-xs text-muted-foreground">Earned on delivery, excluding VAT</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Operating Expenses</p>
@@ -663,6 +664,7 @@ export default function Dashboard() {
             {monthGrowth && (
               <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-800">
                 <p className="text-sm font-medium mb-2">Month-over-Month Growth</p>
+                <p className="text-xs text-muted-foreground mb-2">Month to date vs the same days last month; revenue counts delivered orders.</p>
                 <div className="flex gap-6">
                   <div>
                     <p className="text-xs text-muted-foreground">Revenue</p>
