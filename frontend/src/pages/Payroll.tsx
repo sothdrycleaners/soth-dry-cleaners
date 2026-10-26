@@ -39,7 +39,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Users, Plus, DollarSign, Calendar, CreditCard, Edit, Trash2, Eye } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 
@@ -80,6 +80,7 @@ export default function Payroll() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payments, setPayments] = useState<SalaryPayment[]>([]);
   const [loading, setLoading] = useState(false);
+  const mutationInFlight = useRef(false);
   const [branches, setBranches] = useState<Array<{ id: number; name: string }>>([]);
   const [branchFilter, setBranchFilter] = useState('all');
   
@@ -176,6 +177,8 @@ export default function Payroll() {
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setLoading(true);
     try {
       if (!token) return;
@@ -212,12 +215,15 @@ export default function Payroll() {
         : undefined;
       toast.error(errorMessage || 'Failed to add employee');
     } finally {
+      mutationInFlight.current = false;
       setLoading(false);
     }
   };
 
   const handleProcessPayment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setLoading(true);
     try {
       if (!token) return;
@@ -265,6 +271,7 @@ export default function Payroll() {
         : undefined;
       toast.error(errorMessage || 'Failed to process payment');
     } finally {
+      mutationInFlight.current = false;
       setLoading(false);
     }
   };
@@ -285,7 +292,8 @@ export default function Payroll() {
 
   const handleEditEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingEmployee) return;
+    if (!editingEmployee || mutationInFlight.current) return;
+    mutationInFlight.current = true;
     
     try {
       setLoading(true);
@@ -308,6 +316,7 @@ export default function Payroll() {
         : undefined;
       toast.error(errorMessage || 'Failed to update employee');
     } finally {
+      mutationInFlight.current = false;
       setLoading(false);
     }
   };
@@ -332,10 +341,11 @@ export default function Payroll() {
   };
 
   const handleDeleteEmployee = async (employeeId: number, employeeName: string) => {
+    if (mutationInFlight.current) return;
     if (!confirm(`Are you sure you want to delete ${employeeName}? This action cannot be undone.`)) {
       return;
     }
-    
+    mutationInFlight.current = true;
     try {
       setLoading(true);
       if (!token) return;
@@ -351,11 +361,14 @@ export default function Payroll() {
         : undefined;
       toast.error(errorMessage || 'Failed to delete employee');
     } finally {
+      mutationInFlight.current = false;
       setLoading(false);
     }
   };
 
   const handleStatusChange = async (employeeId: number, newStatus: string) => {
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     try {
       setLoading(true);
       if (!token) return;
@@ -375,6 +388,7 @@ export default function Payroll() {
         : undefined;
       toast.error(errorMessage || 'Failed to update status');
     } finally {
+      mutationInFlight.current = false;
       setLoading(false);
     }
   };
@@ -630,7 +644,7 @@ export default function Payroll() {
                 )}
               </div>
               <div className="flex justify-end gap-2 mt-6">
-                <Button type="button" variant="outline" onClick={() => setShowAddEmployee(false)}>
+                <Button type="button" variant="outline" onClick={() => setShowAddEmployee(false)} disabled={loading}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={loading}>
@@ -773,7 +787,7 @@ export default function Payroll() {
               </div>
 
               <div className="flex justify-end gap-2 mt-6">
-                <Button type="button" variant="outline" onClick={() => setShowProcessPayment(false)}>
+                <Button type="button" variant="outline" onClick={() => setShowProcessPayment(false)} disabled={loading}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={loading || !paymentForm.employee_id}>
@@ -892,6 +906,7 @@ export default function Payroll() {
                       <Button
                         size="sm"
                         variant="destructive"
+                        disabled={loading}
                         onClick={() => handleDeleteEmployee(employee.id, employee.employee_name)}
                         title="Delete employee"
                       >

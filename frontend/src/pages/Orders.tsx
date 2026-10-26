@@ -669,6 +669,8 @@ export default function Orders() {
   const [senderPhone, setSenderPhone] = useState('');
   const [transactionReference, setTransactionReference] = useState('');
   const [newStatus, setNewStatus] = useState('');
+  const [updatingOrderStatus, setUpdatingOrderStatus] = useState(false);
+  const updatingOrderStatusRef = useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalOrders, setTotalOrders] = useState(0);
   const pageSize = 20;
@@ -1227,19 +1229,29 @@ export default function Orders() {
   };
 
   // Update order status
-  const handleUpdateStatus = async () => {
-    if (!selectedOrder || !newStatus) return;
+  const handleUpdateStatus = async (requestedStatus?: string) => {
+    const statusToUpdate = requestedStatus || newStatus;
+    if (!selectedOrder || !statusToUpdate || updatingOrderStatusRef.current) return;
+    updatingOrderStatusRef.current = true;
+    setUpdatingOrderStatus(true);
 
     try {
       const response = await axios.put(
         `${API_BASE_URL}/orders/${selectedOrder.id}/status`,
-        { status: newStatus },
+        { status: statusToUpdate },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      const savedStatus = String(response.data.order?.status || statusToUpdate).toLowerCase();
+      setOrders((current) => current.map((order) => order.id === selectedOrder.id
+        ? { ...order, order_status: savedStatus }
+        : order));
+      setSelectedOrder((current) => current?.id === selectedOrder.id
+        ? { ...current, order_status: savedStatus }
+        : current);
 
       toast({
         title: '✅ Status Updated',
-        description: `Order status changed to ${newStatus}`,
+        description: `Order status changed to ${statusToUpdate}`,
       });
 
       setShowStatusDialog(false);
@@ -1259,6 +1271,9 @@ export default function Orders() {
         title: 'Error',
         description: err.response?.data?.error || 'Failed to update status',
       });
+    } finally {
+      updatingOrderStatusRef.current = false;
+      setUpdatingOrderStatus(false);
     }
   };
 
@@ -2773,25 +2788,21 @@ export default function Orders() {
                 )}
                 {selectedOrder.order_status === 'pending' && (
                   <Button
-                    onClick={() => {
-                      setNewStatus('PROCESSING');
-                      handleUpdateStatus();
-                    }}
+                    onClick={() => handleUpdateStatus('PROCESSING')}
+                    disabled={updatingOrderStatus}
                     variant="outline"
                   >
-                    Start Processing
+                    {updatingOrderStatus ? 'Updating...' : 'Start Processing'}
                   </Button>
                 )}
                 {selectedOrder.order_status === 'processing' && (
                   <Button
-                    onClick={() => {
-                      setNewStatus('READY');
-                      handleUpdateStatus();
-                    }}
+                    onClick={() => handleUpdateStatus('READY')}
+                    disabled={updatingOrderStatus}
                     variant="outline"
                   >
-                    <CheckCircle2 className="h-4 w-4 mr-1" />
-                    Mark as Ready
+                    {updatingOrderStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
+                    {updatingOrderStatus ? 'Updating...' : 'Mark as Ready'}
                   </Button>
                 )}
                 {selectedOrder.order_status === 'ready' && !orderDelivery && (
@@ -2816,14 +2827,12 @@ export default function Orders() {
                 )}
                 {selectedOrder.order_status === 'ready' && (
                   <Button
-                    onClick={() => {
-                      setNewStatus('DELIVERED');
-                      handleUpdateStatus();
-                    }}
+                    onClick={() => handleUpdateStatus('DELIVERED')}
+                    disabled={updatingOrderStatus}
                     variant="outline"
                   >
-                    <CheckCircle2 className="h-4 w-4 mr-1" />
-                    Mark as Delivered
+                    {updatingOrderStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
+                    {updatingOrderStatus ? 'Updating...' : 'Mark as Delivered'}
                   </Button>
                 )}
                 {/* Refund Button - ADMIN/MANAGER can process directly, DESKTOP_AGENT can request */}
@@ -3240,16 +3249,16 @@ export default function Orders() {
               )}
 
               <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t">
-                <Button variant="outline" onClick={() => setShowStatusDialog(false)} className="w-full sm:w-auto">
+                <Button variant="outline" onClick={() => setShowStatusDialog(false)} disabled={updatingOrderStatus} className="w-full sm:w-auto">
                   Cancel
                 </Button>
                 <Button
                   onClick={handleUpdateStatus}
                   className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white"
-                  disabled={!newStatus || newStatus.toLowerCase() === selectedOrder.order_status.toLowerCase()}
+                  disabled={updatingOrderStatus || !newStatus || newStatus.toLowerCase() === selectedOrder.order_status.toLowerCase()}
                 >
-                  <Edit className="h-4 w-4 mr-1.5" />
-                  Confirm Status Update
+                  {updatingOrderStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : <Edit className="h-4 w-4 mr-1.5" />}
+                  {updatingOrderStatus ? 'Updating...' : 'Confirm Status Update'}
                 </Button>
               </div>
             </div>

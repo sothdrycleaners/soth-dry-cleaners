@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '@/lib/api';
 import { formatUGX } from '@/lib/currency';
 import { Button } from '@/components/ui/button';
@@ -97,6 +97,8 @@ const Expenses = () => {
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const expenseActionRef = useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [monthlyStats, setMonthlyStats] = useState({ total: 0, count: 0, pending: 0 });
@@ -219,7 +221,8 @@ const Expenses = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || submittingRef.current) return;
+    submittingRef.current = true;
     try {
       setSubmitting(true);
       await axios.post(`${API_BASE_URL}/expenses`, formData, {
@@ -245,6 +248,7 @@ const Expenses = () => {
         : undefined;
       toast.error(errorMessage || 'Failed to record expense');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -268,7 +272,8 @@ const Expenses = () => {
   };
 
   const handleApprove = async (id: number, status: 'APPROVED' | 'REJECTED') => {
-    if (!token || actionLoading) return;
+    if (!token || expenseActionRef.current) return;
+    expenseActionRef.current = true;
     try {
       setActionLoading({ id, action: status });
       await axios.patch(
@@ -287,16 +292,18 @@ const Expenses = () => {
         : undefined;
       toast.error(errorMessage || 'Failed to approve expense');
     } finally {
+      expenseActionRef.current = false;
       setActionLoading(null);
     }
   };
 
   const handleDelete = async (expense: Expense) => {
-    if (!token || !isAdmin || actionLoading) return;
+    if (!token || !isAdmin || expenseActionRef.current) return;
     const confirmed = window.confirm(
       `Permanently delete this ${expense.status.toLowerCase()} expense of ${formatUGX(expense.amount)}? This cannot be undone.`
     );
     if (!confirmed) return;
+    expenseActionRef.current = true;
     try {
       setActionLoading({ id: expense.id, action: 'DELETE' });
       await axios.delete(`${API_BASE_URL}/expenses/${expense.id}`, {
@@ -314,6 +321,7 @@ const Expenses = () => {
         : undefined;
       toast.error(errorMessage || 'Failed to delete expense');
     } finally {
+      expenseActionRef.current = false;
       setActionLoading(null);
     }
   };

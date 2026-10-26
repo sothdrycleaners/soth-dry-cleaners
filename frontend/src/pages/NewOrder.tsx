@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import axios, { AxiosError } from 'axios';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search,
   Plus,
@@ -271,6 +271,7 @@ export default function NewOrder() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const creatingOrderRef = useRef(false);
   /** Draft text while typing quantity (index → string) so keyboard entry works smoothly */
   const [quantityDrafts, setQuantityDrafts] = useState<Record<number, string>>({});
 
@@ -909,7 +910,7 @@ export default function NewOrder() {
   };
 
   const handleCreateOrder = async () => {
-    if (loading) return;
+    if (creatingOrderRef.current) return;
     if (!selectedCustomer) {
       toast({
         variant: 'destructive',
@@ -948,6 +949,7 @@ export default function NewOrder() {
         return;
       }
 
+      creatingOrderRef.current = true;
       setLoading(true);
 
       const orderData = {
@@ -987,7 +989,7 @@ export default function NewOrder() {
 
       toast({
         title: 'Order Created Successfully',
-        description: `Order ${order.order_number} created for ${customerSnapshot.name}`,
+        description: `Order ${order.order_number} created for ${customerSnapshot.name}. You can find it in Orders.`,
       });
 
       const message = buildOrderConfirmationWhatsAppMessage(
@@ -1054,6 +1056,7 @@ export default function NewOrder() {
         description: getApiErrorMessage(error, 'Failed to create order'),
       });
     } finally {
+      creatingOrderRef.current = false;
       setLoading(false);
     }
   };
@@ -1855,12 +1858,12 @@ export default function NewOrder() {
 
               {/* Create Order Button */}
               <Button
-                className="w-full h-12 text-base font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full h-12 text-base font-bold bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                 onClick={handleCreateOrder}
                 disabled={loading || !selectedCustomer || orderItems.length === 0}
               >
                 {loading ? (
-                  'Creating...'
+                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Creating order...</>
                 ) : (
                   <>
                     <Save className="mr-2 h-5 w-5" />
