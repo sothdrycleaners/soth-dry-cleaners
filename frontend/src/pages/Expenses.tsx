@@ -209,11 +209,9 @@ const Expenses = () => {
   const fetchMonthlyStats = useCallback(async () => {
     if (!token) return;
     try {
-      const { firstDay, lastDay } = getMonthBoundaries(selectedMonth);
-
       const allExpenses = await fetchAllExpenseRows(token, {
-        from_date: firstDay,
-        to_date: lastDay,
+        ...(filters.from_date ? { from_date: filters.from_date } : {}),
+        ...(filters.to_date ? { to_date: filters.to_date } : {}),
         ...(filters.branch_id ? { branch_id: filters.branch_id } : {}),
       });
       const approved = allExpenses.filter((e) => e.status === 'APPROVED');
@@ -227,7 +225,7 @@ const Expenses = () => {
     } catch (error) {
       console.error('Failed to fetch monthly stats:', error);
     }
-  }, [selectedMonth, token, filters.branch_id]);
+  }, [token, filters.from_date, filters.to_date, filters.branch_id]);
 
   useEffect(() => {
     if (!token) return;
@@ -398,13 +396,21 @@ const Expenses = () => {
       doc.text('Expense Report', 14, 16);
       doc.setFontSize(10);
       doc.text(`Expense dates: ${from} to ${to}`, 14, 23);
-      doc.text(`Generated: ${generated} (Africa/Kampala)`, 14, 29);
-      doc.text(`Visible records: ${reportRows.length}   Approved total: ${formatUGX(approvedTotal)}   Pending: ${pending.length}`, 14, 35);
+      const appliedFilters = [
+        filters.category ? `Category: ${filters.category}` : '',
+        filters.status ? `Status: ${filters.status}` : '',
+        filters.branch_id ? `Branch: ${branches.find((branch) => String(branch.id) === filters.branch_id)?.name || filters.branch_id}` : '',
+        filters.search ? `Search: ${filters.search}` : '',
+      ].filter(Boolean);
+      if (appliedFilters.length) doc.text(`Filters: ${appliedFilters.join(' | ')}`, 14, 29);
+      const generatedY = appliedFilters.length ? 35 : 29;
+      doc.text(`Generated: ${generated} (Africa/Kampala)`, 14, generatedY);
+      doc.text(`Matching records: ${reportRows.length}   Approved total: ${formatUGX(approvedTotal)}   Pending: ${pending.length}`, 14, generatedY + 6);
       doc.setFontSize(8);
-      doc.text('Approved total excludes pending and rejected expenses. Each row shows expense date and entry recorded time.', 14, 40);
+      doc.text('Approved total excludes pending and rejected expenses. Each row shows expense date and entry recorded time.', 14, generatedY + 11);
 
       autoTable(doc, {
-        startY: 45,
+        startY: generatedY + 16,
         head: [['Expense Date', 'Recorded At (EAT)', 'Category', 'Description', 'Amount (UGX)', 'Method', 'Status', 'Branch', 'Recorded By', 'Receipt']],
         body: reportRows.map((row) => [
           formatExpenseDate(row.expense_date),
@@ -424,7 +430,8 @@ const Expenses = () => {
         margin: { left: 10, right: 10 },
       });
 
-      const fileName = `expenses-${from}-to-${to}.pdf`;
+      const safePart = (value: string) => value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'all';
+      const fileName = `expenses-${safePart(from)}-to-${safePart(to)}.pdf`;
       if (printAfter) {
         doc.autoPrint();
         const pdfUrl = URL.createObjectURL(doc.output('blob'));
@@ -455,7 +462,7 @@ const Expenses = () => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-6">
         <div className="flex items-center gap-4 w-full sm:w-auto">
           <div className="flex-1 sm:flex-initial">
-            <Label className="text-sm text-gray-600 dark:text-gray-400">Select Month</Label>
+            <Label className="text-sm text-gray-600 dark:text-gray-400">Report period</Label>
             <Input
               type="month"
               value={selectedMonth}
@@ -469,16 +476,28 @@ const Expenses = () => {
               }}
               className="w-full sm:w-48"
             />
+            <Button
+              type="button"
+              variant="ghost"
+              className="mt-2 w-full sm:w-48"
+              onClick={() => {
+                setSelectedMonth('');
+                setFilters((prev) => ({ ...prev, from_date: '', to_date: '' }));
+                setCurrentPage(1);
+              }}
+            >
+              All time
+            </Button>
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <Button variant="outline" disabled={exportingReport} onClick={() => void createExpensesPdf(false)} className="gap-2">
             {exportingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-            Export PDF
+            Export filtered PDF
           </Button>
           <Button variant="outline" disabled={exportingReport} onClick={() => void createExpensesPdf(true)} className="gap-2">
             {exportingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
-            Print Report
+            Print filtered report
           </Button>
           <Button
             onClick={() => {
@@ -543,10 +562,9 @@ const Expenses = () => {
               <Calendar className="w-8 h-8 text-blue-500" />
               <div>
                 <p className="text-2xl font-bold">
-                  {new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString('en-US', {
-                    month: 'long',
-                    year: 'numeric',
-                  })}
+                  {filters.from_date || filters.to_date
+                    ? `${filters.from_date || 'All dates'} to ${filters.to_date || 'Present'}`
+                    : 'All time'}
                 </p>
                 <p className="text-sm text-gray-500">expense history</p>
               </div>
@@ -571,6 +589,7 @@ const Expenses = () => {
                 type="date"
                 value={filters.from_date}
                 onChange={(e) => {
+                  setSelectedMonth('');
                   setFilters({ ...filters, from_date: e.target.value });
                   setCurrentPage(1);
                 }}
@@ -582,6 +601,7 @@ const Expenses = () => {
                 type="date"
                 value={filters.to_date}
                 onChange={(e) => {
+                  setSelectedMonth('');
                   setFilters({ ...filters, to_date: e.target.value });
                   setCurrentPage(1);
                 }}
