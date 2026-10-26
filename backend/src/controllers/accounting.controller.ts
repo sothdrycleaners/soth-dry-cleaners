@@ -274,7 +274,7 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
     res.json({
       as_of_date,
       equity_basis: 'derived_residual',
-      note: 'Partial operational snapshot: cash on hand, expense settlements, unpaid payroll, owner capital, and opening balances are not tracked; inventory is current rather than historical. Equity is a derived residual, not a posted ledger balance.',
+      note: 'Partial operational snapshot: opening cash, unpaid payroll, owner capital, and opening balances are not tracked; approved expenses are treated as paid on their expense date, with no separate settlement ledger. Inventory is current rather than historical. Equity is a derived residual, not a posted ledger balance.',
       assets: {
         current_assets: {
           cash: null,
@@ -422,7 +422,7 @@ export const getCashFlowStatement = async (req: AuthRequest, res: Response) => {
       cash_at_beginning: null,
       cash_at_end: null,
       cash_balance_available: false,
-      note: 'This report shows period cash movements. Opening cash balances and cash expense payment dates are not recorded, so an ending cash balance cannot be calculated reliably.',
+      note: 'This report shows period cash movements. Approved expenses are treated as paid on their expense date. Opening cash balances are not recorded, so an ending cash balance cannot be calculated reliably.',
     });
   } catch (error) {
     console.error('Cash flow statement error:', error);

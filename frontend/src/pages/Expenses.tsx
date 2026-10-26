@@ -300,15 +300,21 @@ const Expenses = () => {
     expenseActionRef.current = true;
     try {
       setActionLoading({ id, action: status });
-      await axios.patch(
+      const response = await axios.patch(
         `${API_BASE_URL}/expenses/${id}/approve`,
         { approval_status: status },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      const updatedExpense = response.data.expense as Partial<Expense>;
+      setExpenses((prev) => prev.map((expense) =>
+        expense.id === id ? { ...expense, ...updatedExpense, status } : expense
+      ));
       toast.success(`Expense ${status.toLowerCase()}`);
-      setSelectedExpense((prev) => (prev && prev.id === id ? { ...prev, status } : prev));
-      fetchExpenses();
-      fetchMonthlyStats();
+      setSelectedExpense((prev) => (prev && prev.id === id
+        ? { ...prev, ...updatedExpense, status }
+        : prev));
+      await Promise.all([fetchExpenses(), fetchMonthlyStats()]);
+      if (status === 'REJECTED') setShowRejectDialog(false);
     } catch (error: unknown) {
       console.error('Failed to approve expense:', error);
       const errorMessage = axios.isAxiosError(error) 
@@ -1105,12 +1111,12 @@ const Expenses = () => {
               disabled={!!actionLoading || pendingRejection === null}
               onClick={() => {
                 if (pendingRejection === null) return;
-                setShowRejectDialog(false);
-                handleApprove(pendingRejection, 'REJECTED');
-                setPendingRejection(null);
+                void handleApprove(pendingRejection, 'REJECTED');
               }}
             >
-              Reject expense
+              {actionLoading?.action === 'REJECTED' ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Rejecting…</>
+              ) : 'Reject expense'}
             </Button>
           </DialogFooter>
         </DialogContent>
