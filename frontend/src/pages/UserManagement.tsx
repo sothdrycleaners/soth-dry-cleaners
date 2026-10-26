@@ -422,10 +422,11 @@ const UserManagement = () => {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      const activatedUser: User = { ...user, status: 'ACTIVE' };
       
       // Show temporary password to admin
       if (response.data.temporaryPassword) {
-        setSelectedUser(user);
+        setSelectedUser(activatedUser);
         setTemporaryPassword(response.data.temporaryPassword);
         setShowTempPasswordDialog(true);
       }
@@ -434,11 +435,18 @@ const UserManagement = () => {
         title: 'Success',
         description: 'User reactivated with temporary password',
       });
-      setUsers((current) => current.map((entry) => entry.id === user.id ? { ...entry, status: 'ACTIVE' } : entry));
-      
-      fetchUsers();
-      fetchStatistics();
-      fetchActivityLogs();
+      await Promise.all([fetchUsers(), fetchStatistics(), fetchActivityLogs()]);
+
+      if (statusFilter === 'SUSPENDED') {
+        setUsers((current) => current.filter((entry) => entry.id !== user.id));
+        const nextTotal = Math.max(0, totalUsers - 1);
+        setTotalUsers(nextTotal);
+        setTotalPages(Math.max(1, Math.ceil(nextTotal / usersPerPage)));
+        setCurrentPage((page) => Math.min(page, Math.max(1, Math.ceil(nextTotal / usersPerPage))));
+      } else {
+        setUsers((current) => current.map((entry) => entry.id === user.id ? activatedUser : entry));
+      }
+      setSelectedUser((current) => current?.id === user.id ? activatedUser : current);
     } catch (error) {
       console.error('Error activating user:', error);
       toast({
