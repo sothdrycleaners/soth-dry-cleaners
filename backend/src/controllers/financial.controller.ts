@@ -321,6 +321,13 @@ export const getFinancialReport = async (req: AuthRequest, res: Response) => {
            AND COALESCE(e.status, e.approval_status) = 'APPROVED'
            AND COALESCE(e.category, '') <> 'Salaries'
          GROUP BY DATE(e.expense_date)
+         UNION ALL
+         SELECT DATE(sp.payment_date), 0::numeric,
+                COALESCE(SUM(sp.net_amount), 0), 0::bigint, COUNT(*)::bigint
+         FROM salary_payments sp
+         WHERE sp.payment_status = 'PAID'
+           AND DATE(sp.payment_date) BETWEEN $1 AND $2
+         GROUP BY DATE(sp.payment_date)
        )
        SELECT ${dateGrouping} AS period,
               COALESCE(SUM(revenue), 0) AS revenue,
@@ -334,18 +341,26 @@ export const getFinancialReport = async (req: AuthRequest, res: Response) => {
       [from_date, to_date]
     );
 
-    // Expense breakdown by category
+    // Approved operating expenses plus paid payroll, using their respective
+    // recorded dates. Legacy Salaries expense rows are excluded to avoid
+    // counting payroll twice.
     const expenseBreakdownResult = await query(
-      `SELECT 
-        e.category as category,
-        '#3B82F6' as color,
-        COALESCE(SUM(e.amount), 0) as amount,
-        COUNT(e.id) as count
-       FROM expenses e
-       WHERE COALESCE(e.status, e.approval_status) = 'APPROVED'
-         AND e.expense_date BETWEEN $1 AND $2
-       GROUP BY e.category
-       HAVING COALESCE(SUM(e.amount), 0) > 0
+      `SELECT category, '#3B82F6' as color, SUM(amount) as amount, SUM(count)::bigint as count
+       FROM (
+         SELECT e.category, SUM(e.amount) as amount, COUNT(e.id)::bigint as count
+         FROM expenses e
+         WHERE COALESCE(e.status, e.approval_status) = 'APPROVED'
+           AND COALESCE(e.category, '') <> 'Salaries'
+           AND e.expense_date BETWEEN $1 AND $2
+         GROUP BY e.category
+         UNION ALL
+         SELECT 'Payroll' as category, SUM(sp.net_amount) as amount, COUNT(*)::bigint as count
+         FROM salary_payments sp
+         WHERE sp.payment_status = 'PAID' AND sp.payment_date BETWEEN $1 AND $2
+         HAVING COALESCE(SUM(sp.net_amount), 0) > 0
+       ) expense_items
+       GROUP BY category
+       HAVING SUM(amount) > 0
        ORDER BY amount DESC`,
       [from_date, to_date]
     );

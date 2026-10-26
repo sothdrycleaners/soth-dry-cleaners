@@ -61,6 +61,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
 
     ordersDateFilter = andBranchFilter(ordersDateFilter, 'branch_id', branchId);
     updatedAtDateFilter = andBranchFilter(updatedAtDateFilter, 'branch_id', branchId);
+    const deliveredAtDateFilter = andBranchFilter(deliveriesDateFilter, 'branch_id', branchId);
     const payFrom = paymentsFrom(branchId);
     const branchOrderAnd = branchId ? `AND branch_id = ${Number(branchId)}` : '';
     const activePaymentDateFilter = paymentsDateFilter
@@ -129,11 +130,11 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       `SELECT COUNT(*) as count FROM orders WHERE status = 'ready' ${branchOrderAnd}`
     );
 
-    // DELIVERED - filtered by period (when they were marked delivered via updated_at)
+    // DELIVERED - filtered by the actual delivery recognition date.
     const deliveredOrdersResult = await query(
       `SELECT COUNT(*) as count FROM orders 
-       ${updatedAtDateFilter}
-       ${updatedAtDateFilter ? 'AND' : 'WHERE'} status = 'delivered'`
+       ${deliveredAtDateFilter}
+       ${deliveredAtDateFilter ? 'AND' : 'WHERE'} status = 'delivered'`
     );
 
     // CANCELLED - filtered by period (when they were marked cancelled via updated_at)

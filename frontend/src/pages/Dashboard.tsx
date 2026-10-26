@@ -485,10 +485,10 @@ export default function Dashboard() {
         {/* ADMIN ONLY: Revenue (sensitive financial data) */}
         {isAdmin ? (
           <StatCard
-            title={statsPeriod === 'today' ? "Today's Revenue" : 
-                   statsPeriod === 'week' ? "Week's Revenue" :
-                   statsPeriod === 'month' ? "Month's Revenue" :
-                   statsPeriod === 'year' ? "Year's Revenue" : "Total Revenue"}
+            title={statsPeriod === 'today' ? "Today's Cash Collected" : 
+                   statsPeriod === 'week' ? "Week's Cash Collected" :
+                   statsPeriod === 'month' ? "Month's Cash Collected" :
+                   statsPeriod === 'year' ? "Year's Cash Collected" : "Total Cash Collected"}
             value={loading ? '...' : formatUGX(stats.totalRevenue)}
             subtitle="Cash collected"
             icon={DollarSign}
