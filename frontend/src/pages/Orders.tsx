@@ -1336,10 +1336,19 @@ export default function Orders() {
         description: response.data.message || 'Order has been permanently deleted and archived',
       });
 
+      const deletedOrderId = selectedOrder.id;
+      const wasInCurrentList = orders.some((order) => order.id === deletedOrderId);
+      setOrders((current) => current.filter((order) => order.id !== deletedOrderId));
+      if (wasInCurrentList) {
+        const nextTotal = Math.max(0, totalOrders - 1);
+        setTotalOrders(nextTotal);
+        const lastPage = Math.max(1, Math.ceil(nextTotal / pageSize));
+        if (currentPage > lastPage) setCurrentPage(lastPage);
+      }
+
       setShowDeleteOrderDialog(false);
       setShowDetailsDialog(false);
       setSelectedOrder(null);
-      await fetchOrders();
     } catch (error) {
       const err = error as { response?: { data?: { error?: string } } };
       toast({
