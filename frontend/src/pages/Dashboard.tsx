@@ -664,19 +664,23 @@ export default function Dashboard() {
             {monthGrowth && (
               <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-800">
                 <p className="text-sm font-medium mb-2">Month-over-Month Growth</p>
-                <p className="text-xs text-muted-foreground mb-2">Month to date vs the same days last month; revenue counts delivered orders.</p>
+                <p className="text-xs text-muted-foreground mb-2">Current month to date vs the same calendar days last month. Revenue is delivered service value excluding VAT; order counts include delivered orders only.</p>
                 <div className="flex gap-6">
                   <div>
-                    <p className="text-xs text-muted-foreground">Revenue</p>
+                    <p className="text-xs text-muted-foreground">Delivered Revenue</p>
                     <p className={`text-lg font-semibold ${monthGrowth.growth.revenue >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {monthGrowth.growth.revenue >= 0 ? '+' : ''}{monthGrowth.growth.revenue.toFixed(1)}%
                     </p>
+                    <p className="text-[10px] text-muted-foreground">Now {formatUGX(monthGrowth.currentMonth.revenue)}</p>
+                    <p className="text-[10px] text-muted-foreground">Prior {formatUGX(monthGrowth.previousMonth.revenue)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Orders</p>
+                    <p className="text-xs text-muted-foreground">Delivered Orders</p>
                     <p className={`text-lg font-semibold ${monthGrowth.growth.orders >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {monthGrowth.growth.orders >= 0 ? '+' : ''}{monthGrowth.growth.orders.toFixed(1)}%
                     </p>
+                    <p className="text-[10px] text-muted-foreground">Now {monthGrowth.currentMonth.orders.toLocaleString()}</p>
+                    <p className="text-[10px] text-muted-foreground">Prior {monthGrowth.previousMonth.orders.toLocaleString()}</p>
                   </div>
                 </div>
               </div>

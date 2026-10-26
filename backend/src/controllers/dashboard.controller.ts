@@ -540,7 +540,7 @@ export const getMonthOverMonth = async (req: AuthRequest, res: Response) => {
 
     res.json({
       comparison: 'month_to_date',
-      revenue_basis: 'delivered_orders',
+      revenue_basis: 'delivered_service_value_excluding_vat',
       currentMonth: {
         revenue: currentRevenue,
         orders: currentOrders,
