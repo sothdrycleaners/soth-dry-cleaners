@@ -1242,12 +1242,21 @@ export default function Orders() {
         { status: statusToUpdate },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      const savedStatus = String(response.data.order?.status || statusToUpdate).toLowerCase();
+      const updatedOrder = response.data.order;
+      const savedStatus = String(updatedOrder?.status || statusToUpdate).toLowerCase();
       setOrders((current) => current.map((order) => order.id === selectedOrder.id
-        ? { ...order, order_status: savedStatus }
+        ? {
+            ...order,
+            order_status: savedStatus,
+            ...(updatedOrder?.pickup_date ? { pickup_date: updatedOrder.pickup_date } : {}),
+          }
         : order));
       setSelectedOrder((current) => current?.id === selectedOrder.id
-        ? { ...current, order_status: savedStatus }
+        ? {
+            ...current,
+            order_status: savedStatus,
+            ...(updatedOrder?.pickup_date ? { pickup_date: updatedOrder.pickup_date } : {}),
+          }
         : current);
 
       toast({
@@ -1265,6 +1274,23 @@ export default function Orders() {
       if (selectedOrder && selectedOrder.id) {
         await viewOrderDetails(selectedOrder);
       }
+
+      // Keep the status confirmed by the write as the visible source of truth
+      // if a follow-up read returns stale order data.
+      setOrders((current) => current.map((order) => order.id === selectedOrder.id
+        ? {
+            ...order,
+            order_status: savedStatus,
+            ...(updatedOrder?.pickup_date ? { pickup_date: updatedOrder.pickup_date } : {}),
+          }
+        : order));
+      setSelectedOrder((current) => current?.id === selectedOrder.id
+        ? {
+            ...current,
+            order_status: savedStatus,
+            ...(updatedOrder?.pickup_date ? { pickup_date: updatedOrder.pickup_date } : {}),
+          }
+        : current);
     } catch (error) {
       const err = error as {
         message?: string;
