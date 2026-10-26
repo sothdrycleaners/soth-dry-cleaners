@@ -38,10 +38,11 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Users, Plus, DollarSign, Calendar, CreditCard, Edit, Trash2, Eye } from 'lucide-react';
+import { Users, Plus, DollarSign, Calendar, CreditCard, Edit, Trash2, Eye, Loader2 } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { formatKampalaDate, kampalaTodayYmd } from '@/lib/businessDate';
 
 interface Employee {
   id: number;
@@ -80,6 +81,8 @@ export default function Payroll() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payments, setPayments] = useState<SalaryPayment[]>([]);
   const [loading, setLoading] = useState(false);
+  const [busyAction, setBusyAction] = useState<'add' | 'payment' | 'edit' | 'delete' | 'status' | null>(null);
+  const [busyEmployeeId, setBusyEmployeeId] = useState<number | null>(null);
   const mutationInFlight = useRef(false);
   const [branches, setBranches] = useState<Array<{ id: number; name: string }>>([]);
   const [branchFilter, setBranchFilter] = useState('all');
@@ -123,7 +126,9 @@ export default function Payroll() {
   // Process Payment Form
   const [paymentForm, setPaymentForm] = useState({
     employee_id: '',
-    payment_period: new Date().toISOString().slice(0, 7), // YYYY-MM
+    payment_period: kampalaTodayYmd().slice(0, 7), // YYYY-MM
+    payment_date: kampalaTodayYmd(),
+    amount_paid: '',
     deductions: '0',
     bonuses: '0',
     payment_method: 'BANK_TRANSFER',
@@ -180,9 +185,10 @@ export default function Payroll() {
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
     setLoading(true);
+    setBusyAction('add');
     try {
       if (!token) return;
-      await axios.post(
+      const response = await axios.post(
         `${API_BASE_URL}/payroll/employees`,
         {
           ...newEmployee,
@@ -193,6 +199,8 @@ export default function Payroll() {
         }
       );
       toast.success('Employee added successfully');
+      setEmployees((current) => [response.data, ...current.filter((employee) => employee.id !== response.data.id)]);
+      setEmployeePage(1);
       setShowAddEmployee(false);
       setNewEmployee({
         employee_name: '',
@@ -207,7 +215,7 @@ export default function Payroll() {
         hire_date: '',
         branch_id: '',
       });
-      fetchEmployees();
+      await fetchEmployees();
     } catch (error: unknown) {
       console.error('Failed to add employee:', error);
       const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -217,6 +225,7 @@ export default function Payroll() {
     } finally {
       mutationInFlight.current = false;
       setLoading(false);
+      setBusyAction(null);
     }
   };
 
@@ -225,6 +234,7 @@ export default function Payroll() {
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
     setLoading(true);
+    setBusyAction('payment');
     try {
       if (!token) return;
       const employee = employees.find(emp => emp.id === parseInt(paymentForm.employee_id));
@@ -233,21 +243,31 @@ export default function Payroll() {
         return;
       }
 
-      const deductions = parseFloat(paymentForm.deductions);
-      const bonuses = parseFloat(paymentForm.bonuses);
-      const netAmount = employee.salary_amount - deductions + bonuses;
+      const deductions = Number(paymentForm.deductions || 0);
+      const bonuses = Number(paymentForm.bonuses || 0);
+      const amountPaid = Number(paymentForm.amount_paid);
+      if (!Number.isFinite(amountPaid) || amountPaid <= 0 || !paymentForm.payment_date) {
+        toast.error('Enter a valid gross amount and paid date');
+        return;
+      }
+      const netAmount = amountPaid - deductions + bonuses;
+      if (!Number.isFinite(netAmount) || netAmount < 0) {
+        toast.error('Deductions cannot exceed the gross salary plus bonuses');
+        return;
+      }
 
       await axios.post(
         `${API_BASE_URL}/payroll/payments`,
         {
           employee_id: parseInt(paymentForm.employee_id),
           payment_period: paymentForm.payment_period,
-          amount_paid: employee.salary_amount,
+          payment_date: paymentForm.payment_date,
+          amount_paid: amountPaid,
           deductions,
           bonuses,
           net_amount: netAmount,
           payment_method: paymentForm.payment_method,
-          notes: paymentForm.notes,
+          notes: paymentForm.notes || (paymentForm.payment_date < kampalaTodayYmd() ? 'Historical salary payment' : ''),
         },
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -257,13 +277,17 @@ export default function Payroll() {
       setShowProcessPayment(false);
       setPaymentForm({
         employee_id: '',
-        payment_period: new Date().toISOString().slice(0, 7),
+        payment_period: kampalaTodayYmd().slice(0, 7),
+        payment_date: kampalaTodayYmd(),
+        amount_paid: '',
         deductions: '0',
         bonuses: '0',
         payment_method: 'BANK_TRANSFER',
         notes: '',
       });
-      fetchPayments();
+      setPaymentPage(1);
+      await fetchPayments();
+      if (selectedEmployee?.id === employee.id) await handleViewEmployee(employee);
     } catch (error: unknown) {
       console.error('Failed to process payment:', error);
       const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -273,20 +297,23 @@ export default function Payroll() {
     } finally {
       mutationInFlight.current = false;
       setLoading(false);
+      setBusyAction(null);
     }
   };
 
   const handlePaymentEmployeeChange = (employeeId: string) => {
     const employee = employees.find((item) => item.id === parseInt(employeeId, 10));
-    const today = new Date();
+    const today = kampalaTodayYmd();
     const defaultPeriod = employee?.payment_frequency === 'DAILY'
-      ? today.toISOString().slice(0, 10)
-      : today.toISOString().slice(0, 7);
+      ? today
+      : today.slice(0, 7);
 
     setPaymentForm((current) => ({
       ...current,
       employee_id: employeeId,
       payment_period: defaultPeriod,
+      payment_date: today,
+      amount_paid: employee ? String(employee.salary_amount) : '',
     }));
   };
 
@@ -294,21 +321,29 @@ export default function Payroll() {
     e.preventDefault();
     if (!editingEmployee || mutationInFlight.current) return;
     mutationInFlight.current = true;
+    setBusyAction('edit');
     
     try {
       setLoading(true);
       if (!token) return;
-      await axios.put(
+      const response = await axios.put(
         `${API_BASE_URL}/payroll/employees/${editingEmployee.id}`,
         editingEmployee,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
+      setEmployees((current) => current.map((employee) => employee.id === editingEmployee.id
+        ? {
+          ...employee,
+          ...response.data,
+          branch_name: branches.find((branch) => String(branch.id) === String(response.data.branch_id))?.name || null,
+        }
+        : employee));
       toast.success('Employee updated successfully');
       setShowEditEmployee(false);
       setEditingEmployee(null);
-      fetchEmployees();
+      await fetchEmployees();
     } catch (error: unknown) {
       console.error('Failed to update employee:', error);
       const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -318,6 +353,7 @@ export default function Payroll() {
     } finally {
       mutationInFlight.current = false;
       setLoading(false);
+      setBusyAction(null);
     }
   };
 
@@ -346,6 +382,8 @@ export default function Payroll() {
       return;
     }
     mutationInFlight.current = true;
+    setBusyAction('delete');
+    setBusyEmployeeId(employeeId);
     try {
       setLoading(true);
       if (!token) return;
@@ -353,7 +391,8 @@ export default function Payroll() {
         headers: { Authorization: `Bearer ${token}` },
       });
       toast.success('Employee deleted successfully');
-      fetchEmployees();
+      setEmployees((current) => current.filter((employee) => employee.id !== employeeId));
+      await fetchEmployees();
     } catch (error: unknown) {
       console.error('Failed to delete employee:', error);
       const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -363,24 +402,29 @@ export default function Payroll() {
     } finally {
       mutationInFlight.current = false;
       setLoading(false);
+      setBusyAction(null);
+      setBusyEmployeeId(null);
     }
   };
 
   const handleStatusChange = async (employeeId: number, newStatus: string) => {
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
+    setBusyAction('status');
+    setBusyEmployeeId(employeeId);
     try {
       setLoading(true);
       if (!token) return;
-      await axios.patch(
+      const response = await axios.patch(
         `${API_BASE_URL}/payroll/employees/${employeeId}/status`,
         { employment_status: newStatus },
         {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
+      setEmployees((current) => current.map((employee) => employee.id === employeeId ? { ...employee, ...response.data } : employee));
       toast.success(`Employee status updated to ${newStatus}`);
-      fetchEmployees();
+      await fetchEmployees();
     } catch (error: unknown) {
       console.error('Failed to update status:', error);
       const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -390,6 +434,8 @@ export default function Payroll() {
     } finally {
       mutationInFlight.current = false;
       setLoading(false);
+      setBusyAction(null);
+      setBusyEmployeeId(null);
     }
   };
 
@@ -494,7 +540,7 @@ export default function Payroll() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">
-              {payments.length > 0 ? new Date(payments[0].payment_date).toLocaleDateString() : 'N/A'}
+              {payments.length > 0 ? formatKampalaDate(payments[0].payment_date) : 'N/A'}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Most recent</p>
           </CardContent>
@@ -505,7 +551,7 @@ export default function Payroll() {
       <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
         <Dialog open={showAddEmployee} onOpenChange={setShowAddEmployee}>
           <DialogTrigger asChild>
-            <Button className="gap-2 bg-blue-600 hover:bg-blue-700">
+            <Button className="gap-2 bg-blue-600 hover:bg-blue-700" disabled={loading}>
               <Plus className="h-4 w-4" />
               Add Employee
             </Button>
@@ -647,8 +693,8 @@ export default function Payroll() {
                 <Button type="button" variant="outline" onClick={() => setShowAddEmployee(false)} disabled={loading}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={loading}>
-                  {loading ? 'Adding...' : 'Add Employee'}
+                <Button type="submit" disabled={loading} className={loading ? 'opacity-60' : ''}>
+                  {busyAction === 'add' ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Adding...</> : 'Add Employee'}
                 </Button>
               </div>
             </form>
@@ -657,7 +703,7 @@ export default function Payroll() {
 
         <Dialog open={showProcessPayment} onOpenChange={setShowProcessPayment}>
           <DialogTrigger asChild>
-            <Button className="gap-2 bg-green-600 hover:bg-green-700">
+            <Button className="gap-2 bg-green-600 hover:bg-green-700" disabled={loading}>
               <CreditCard className="h-4 w-4" />
               Process Salary Payment
             </Button>
@@ -666,7 +712,7 @@ export default function Payroll() {
             <DialogHeader>
               <DialogTitle>Process Salary Payment</DialogTitle>
               <DialogDescription>
-                Record a salary payment for an employee
+              Record a current or historical salary payment for an employee
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleProcessPayment} className="space-y-4">
@@ -681,13 +727,49 @@ export default function Payroll() {
                     <SelectValue placeholder="Choose employee" />
                   </SelectTrigger>
                   <SelectContent>
-                    {activeEmployees.map((emp) => (
+                    {employees.map((emp) => (
                       <SelectItem key={emp.id} value={emp.id.toString()}>
-                        {emp.employee_name} - {emp.position} ({formatUGX(emp.salary_amount)} / {paymentFrequencyLabel(emp.payment_frequency)})
+                        {emp.employee_name} - {emp.position} ({formatUGX(emp.salary_amount)} / {paymentFrequencyLabel(emp.payment_frequency)} · {emp.employment_status})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="payment_date">Date paid *</Label>
+                  <Input
+                    id="payment_date"
+                    type="date"
+                    required
+                    max={kampalaTodayYmd()}
+                    value={paymentForm.payment_date}
+                    onChange={(e) => {
+                      const paymentDate = e.target.value;
+                      const employee = employees.find((item) => item.id === Number(paymentForm.employee_id));
+                      setPaymentForm({
+                        ...paymentForm,
+                        payment_date: paymentDate,
+                        payment_period: employee?.payment_frequency === 'DAILY' ? paymentDate : paymentDate.slice(0, 7),
+                      });
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">Use the original date for a historical salary payment; accounting reports use this date.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="amount_paid">Gross salary paid (UGX) *</Label>
+                  <Input
+                    id="amount_paid"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    required
+                    value={paymentForm.amount_paid}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, amount_paid: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">Defaults to the employee’s current pay rate; adjust to the actual historical amount if needed.</p>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -729,15 +811,14 @@ export default function Payroll() {
                 <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg">
                   <p className="text-sm font-medium mb-2">Payment Summary</p>
                   {(() => {
-                    const employee = employees.find(e => e.id === parseInt(paymentForm.employee_id));
-                    const deductions = parseFloat(paymentForm.deductions);
-                    const bonuses = parseFloat(paymentForm.bonuses);
-                    const netAmount = employee ? employee.salary_amount - deductions + bonuses : 0;
+                    const deductions = Number(paymentForm.deductions || 0);
+                    const bonuses = Number(paymentForm.bonuses || 0);
+                    const netAmount = Number(paymentForm.amount_paid) - deductions + bonuses;
                     return (
                       <>
                         <div className="flex justify-between text-sm">
-                          <span>Base Salary:</span>
-                          <span>{formatUGX(employee?.salary_amount)} / {paymentFrequencyLabel(employee?.payment_frequency || 'MONTHLY')}</span>
+                          <span>Gross salary paid:</span>
+                          <span>{formatUGX(Number(paymentForm.amount_paid) || 0)}</span>
                         </div>
                         <div className="flex justify-between text-sm text-red-600">
                           <span>Deductions:</span>
@@ -790,8 +871,8 @@ export default function Payroll() {
                 <Button type="button" variant="outline" onClick={() => setShowProcessPayment(false)} disabled={loading}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={loading || !paymentForm.employee_id}>
-                  {loading ? 'Processing...' : 'Process Payment'}
+                <Button type="submit" disabled={loading || !paymentForm.employee_id} className={loading ? 'opacity-60' : ''}>
+                  {busyAction === 'payment' ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : 'Process Payment'}
                 </Button>
               </div>
             </form>
@@ -866,8 +947,10 @@ export default function Payroll() {
                       onValueChange={(value) => handleStatusChange(employee.id, value)}
                       disabled={loading}
                     >
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
+                      <SelectTrigger className={`w-32 ${busyEmployeeId === employee.id ? 'opacity-60' : ''}`}>
+                        {busyAction === 'status' && busyEmployeeId === employee.id
+                          ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving</>
+                          : <SelectValue />}
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="ACTIVE">
@@ -887,6 +970,7 @@ export default function Payroll() {
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={loading}
                         onClick={() => handleViewEmployee(employee)}
                         title="View employee and salary history"
                       >
@@ -895,6 +979,7 @@ export default function Payroll() {
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={loading}
                         onClick={() => {
                           setEditingEmployee(employee);
                           setShowEditEmployee(true);
@@ -907,10 +992,13 @@ export default function Payroll() {
                         size="sm"
                         variant="destructive"
                         disabled={loading}
+                        className={busyEmployeeId === employee.id ? 'opacity-60' : ''}
                         onClick={() => handleDeleteEmployee(employee.id, employee.employee_name)}
                         title="Delete employee"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        {busyAction === 'delete' && busyEmployeeId === employee.id
+                          ? <Loader2 className="h-4 w-4 animate-spin" />
+                          : <Trash2 className="h-4 w-4" />}
                       </Button>
                     </div>
                   </TableCell>
@@ -1001,20 +1089,22 @@ export default function Payroll() {
                         <TableHead>Period</TableHead>
                         <TableHead>Net amount</TableHead>
                         <TableHead>Method</TableHead>
+                        <TableHead>Status</TableHead>
                         <TableHead>Paid date</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loadingEmployeeHistory ? (
-                        <TableRow><TableCell colSpan={4} className="text-center py-6">Loading history…</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={5} className="text-center py-6">Loading history…</TableCell></TableRow>
                       ) : employeeSalaryHistory.length === 0 ? (
-                        <TableRow><TableCell colSpan={4} className="text-center py-6 text-muted-foreground">No salary payments recorded</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">No salary payments recorded</TableCell></TableRow>
                       ) : employeeSalaryHistory.map((payment) => (
                         <TableRow key={payment.id}>
                           <TableCell>{payment.payment_period}</TableCell>
                           <TableCell className="font-semibold">{formatUGX(payment.net_amount)}</TableCell>
                           <TableCell>{payment.payment_method}</TableCell>
-                          <TableCell>{new Date(payment.payment_date).toLocaleDateString()}</TableCell>
+                          <TableCell><Badge variant={payment.payment_status === 'PAID' ? 'default' : 'secondary'}>{payment.payment_status}</Badge></TableCell>
+                          <TableCell>{formatKampalaDate(payment.payment_date)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1156,8 +1246,8 @@ export default function Payroll() {
                 }}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={loading}>
-                  {loading ? 'Updating...' : 'Update Employee'}
+                <Button type="submit" disabled={loading} className={loading ? 'opacity-60' : ''}>
+                  {busyAction === 'edit' ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Updating...</> : 'Update Employee'}
                 </Button>
               </div>
             </form>
@@ -1186,13 +1276,14 @@ export default function Payroll() {
                 <TableHead className="font-semibold dark:text-gray-100">Bonuses</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Net Amount</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Method</TableHead>
+                <TableHead className="font-semibold dark:text-gray-100">Status</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Date</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedPayments.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                     No payment records found
                   </TableCell>
                 </TableRow>
@@ -1214,7 +1305,8 @@ export default function Payroll() {
                     {formatUGX(payment.net_amount)}
                   </TableCell>
                   <TableCell className="dark:text-gray-100">{payment.payment_method}</TableCell>
-                  <TableCell className="dark:text-gray-100">{new Date(payment.payment_date).toLocaleDateString()}</TableCell>
+                  <TableCell><Badge variant={payment.payment_status === 'PAID' ? 'default' : 'secondary'}>{payment.payment_status}</Badge></TableCell>
+                  <TableCell className="dark:text-gray-100">{formatKampalaDate(payment.payment_date)}</TableCell>
                 </TableRow>
               ))
               )}
