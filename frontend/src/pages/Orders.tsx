@@ -1265,11 +1265,24 @@ export default function Orders() {
         await viewOrderDetails(selectedOrder);
       }
     } catch (error) {
-      const err = error as { response?: { data?: { error?: string } } };
+      const err = error as {
+        message?: string;
+        response?: {
+          status?: number;
+          data?: { error?: string; errors?: Array<{ msg?: string }> };
+        };
+      };
+      const validationErrors = err.response?.data?.errors
+        ?.map((entry) => entry.msg)
+        .filter(Boolean)
+        .join('; ');
       toast({
         variant: 'destructive',
-        title: 'Error',
-        description: err.response?.data?.error || 'Failed to update status',
+        title: err.response?.status
+          ? `Status update failed (${err.response.status})`
+          : 'Status update failed',
+        description:
+          err.response?.data?.error || validationErrors || err.message || 'Please try again.',
       });
     } finally {
       updatingOrderStatusRef.current = false;
