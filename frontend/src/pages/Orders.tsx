@@ -1230,7 +1230,8 @@ export default function Orders() {
 
   // Update order status
   const handleUpdateStatus = async (requestedStatus?: string) => {
-    const statusToUpdate = requestedStatus || newStatus;
+    // Ignore a click event if this handler is ever wired directly to a button.
+    const statusToUpdate = typeof requestedStatus === 'string' ? requestedStatus : newStatus;
     if (!selectedOrder || !statusToUpdate || updatingOrderStatusRef.current) return;
     updatingOrderStatusRef.current = true;
     setUpdatingOrderStatus(true);
@@ -3266,7 +3267,7 @@ export default function Orders() {
                   Cancel
                 </Button>
                 <Button
-                  onClick={handleUpdateStatus}
+                  onClick={() => handleUpdateStatus()}
                   className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white"
                   disabled={updatingOrderStatus || !newStatus || newStatus.toLowerCase() === selectedOrder.order_status.toLowerCase()}
                 >
