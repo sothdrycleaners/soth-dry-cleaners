@@ -206,7 +206,8 @@ export const login = async (req: AuthRequest, res: Response) => {
     const result = await query(
       `SELECT id, email, password, full_name, phone, role, status, profile_picture, profile_picture_url,
               tenant_id,
-              branch_id, failed_login_attempts, account_locked_until, last_failed_login
+              branch_id, failed_login_attempts, account_locked_until, last_failed_login,
+              must_change_password, COALESCE(temporary_password_login_attempts, 0) AS temporary_password_login_attempts
        FROM users WHERE email = $1 AND tenant_id = $2`,
       [email, config.tenancy.deploymentTenantId]
     );
@@ -220,6 +221,15 @@ export const login = async (req: AuthRequest, res: Response) => {
     }
     
     const user = result.rows[0];
+
+    // Temporary passwords allow three login attempts, including mistyped
+    // passwords. A user who reaches the limit must ask for a fresh code.
+    if (user.must_change_password && Number(user.temporary_password_login_attempts) >= 3) {
+      await logFailedLogin(email, clientIP, userAgent, 'Temporary password login limit reached');
+      return res.status(403).json({
+        error: 'This temporary password has expired. Please contact an administrator for a new one-time password.'
+      });
+    }
 
     // Check if account is currently locked out (per-account brute-force protection)
     if (user.account_locked_until && new Date(user.account_locked_until) > new Date()) {
@@ -262,6 +272,27 @@ export const login = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ 
         error: 'This account has no password set. Please contact the systems administrator.'
       });
+    }
+
+    // Reserve one of the three attempts before checking the password so
+    // parallel requests cannot exceed the limit. Attempt three is permitted.
+    if (user.must_change_password) {
+      const attemptResult = await query(
+        `UPDATE users
+         SET temporary_password_login_attempts = COALESCE(temporary_password_login_attempts, 0) + 1
+         WHERE id = $1 AND tenant_id = $2
+           AND must_change_password = TRUE
+           AND COALESCE(temporary_password_login_attempts, 0) < 3
+         RETURNING temporary_password_login_attempts`,
+        [user.id, user.tenant_id]
+      );
+
+      if (attemptResult.rows.length === 0) {
+        await logFailedLogin(email, clientIP, userAgent, 'Temporary password login limit reached');
+        return res.status(403).json({
+          error: 'This temporary password has expired. Please contact an administrator for a new one-time password.'
+        });
+      }
     }
     
     // Verify password
@@ -330,7 +361,8 @@ export const login = async (req: AuthRequest, res: Response) => {
            last_failed_login = NULL
        WHERE id = $1 AND tenant_id = $2
        RETURNING id, email, full_name, phone, role, status, profile_picture, profile_picture_url,
-                 tenant_id, branch_id, created_at, updated_at, last_login, max_bargain_amount, max_item_bargain_amount`,
+                 tenant_id, branch_id, created_at, updated_at, last_login, max_bargain_amount,
+                 max_item_bargain_amount, must_change_password, temporary_password_login_attempts`,
       [user.id, user.tenant_id]
     );
     
@@ -376,7 +408,8 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     const result = await query(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.status, u.profile_picture,
               u.profile_picture_url, u.created_at, u.updated_at, u.last_login, u.auth_provider,
-              u.max_bargain_amount, u.max_item_bargain_amount, u.tenant_id, u.branch_id, b.name AS branch_name
+              u.max_bargain_amount, u.max_item_bargain_amount, u.tenant_id, u.branch_id,
+              u.must_change_password, b.name AS branch_name
        FROM users u
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.id = $1 AND u.tenant_id = $2`,
@@ -514,7 +547,12 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     
     // Update password and clear must_change_password flag
     await query(
-      'UPDATE users SET password = $1, must_change_password = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      `UPDATE users
+       SET password = $1,
+           must_change_password = FALSE,
+           temporary_password_login_attempts = 0,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
       [hashedNewPassword, userId]
     );
     

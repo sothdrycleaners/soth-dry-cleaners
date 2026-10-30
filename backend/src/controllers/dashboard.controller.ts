@@ -291,7 +291,11 @@ export const getFinancialSummary = async (req: AuthRequest, res: Response) => {
 
     // Include salary payments in total expenses so dashboard profit is accurate
     const salaryParams = params; // same date params apply
-    const salaryWhere = expensesWhere.replace('expense_date', 'payment_date').replace('COALESCE(status, approval_status)', 'payment_status').replace("'APPROVED'", "'PAID'");
+    // Payroll has no expense category column. Build its filter independently
+    // so the expense-only Salaries exclusion is not applied to salary_payments.
+    const salaryWhere = dateRange
+      ? `WHERE payment_date >= $1 AND payment_date <= $2 AND payment_status = 'PAID'`
+      : `WHERE payment_status = 'PAID'`;
     let salaries = 0;
     try {
       const salaryResult = await query(

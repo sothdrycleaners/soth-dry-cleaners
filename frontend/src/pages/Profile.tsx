@@ -51,6 +51,17 @@ const Profile = () => {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!user?.must_change_password) return;
+    const focusPasswordSection = () => {
+      const section = document.getElementById('change-password');
+      section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('current-password')?.focus({ preventScroll: true });
+    };
+    const timer = window.setTimeout(focusPasswordSection, 100);
+    return () => window.clearTimeout(timer);
+  }, [user?.must_change_password]);
+
   const handleProfileUpdate = async () => {
     try {
       setLoading(true);
@@ -239,6 +250,10 @@ const Profile = () => {
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      if (updateUser && user) {
+        updateUser({ ...user, must_change_password: false });
+      }
 
       toast({
         title: 'Success',
@@ -489,7 +504,7 @@ const Profile = () => {
         </Card>
 
         {/* Change Password */}
-        <Card>
+        <Card id="change-password" className="scroll-mt-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5" />
@@ -508,7 +523,8 @@ const Profile = () => {
                   type="password"
                   value={passwordData.currentPassword}
                   onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                  placeholder="Enter current password"
+                  placeholder={user.must_change_password ? 'Enter your temporary password' : 'Enter current password'}
+                  autoFocus={user.must_change_password}
                 />
               </div>
               <div className="space-y-2">
