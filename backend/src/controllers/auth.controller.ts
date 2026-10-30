@@ -194,7 +194,8 @@ export const register = async (req: AuthRequest, res: Response) => {
 
 export const login = async (req: AuthRequest, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+    const { password } = req.body;
     
     // Get client IP and user agent for security logging
     const clientIP = req.ip || 'unknown';
@@ -208,7 +209,7 @@ export const login = async (req: AuthRequest, res: Response) => {
               tenant_id,
               branch_id, failed_login_attempts, account_locked_until, last_failed_login,
               must_change_password, COALESCE(temporary_password_login_attempts, 0) AS temporary_password_login_attempts
-       FROM users WHERE email = $1 AND tenant_id = $2`,
+       FROM users WHERE LOWER(email) = LOWER($1) AND tenant_id = $2`,
       [email, config.tenancy.deploymentTenantId]
     );
     
@@ -522,8 +523,10 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     
     // Get user's current password
     const result = await query(
-      'SELECT password FROM users WHERE id = $1',
-      [userId]
+      `SELECT password, must_change_password
+       FROM users
+       WHERE id = $1 AND tenant_id = $2`,
+      [userId, req.user!.tenant_id || config.tenancy.deploymentTenantId]
     );
     
     if (result.rows.length === 0) {
@@ -532,14 +535,18 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     
     const user = result.rows[0];
     
-    if (!currentPassword) {
-      return res.status(400).json({ error: 'Current password is required' });
-    }
-    
-    // Verify current password
-    const isValidPassword = await bcrypt.compare(currentPassword, user.password);
-    if (!isValidPassword) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
+    // A valid authenticated session created with a temporary password is
+    // sufficient proof for the forced first-login password replacement.
+    // Ordinary password changes still require the current password.
+    if (!user.must_change_password) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Current password is required' });
+      }
+
+      const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
     }
     
     // Hash new password

@@ -210,7 +210,7 @@ const Profile = () => {
       return;
     }
 
-    if (!passwordData.currentPassword) {
+    if (!user.must_change_password && !passwordData.currentPassword) {
       toast({
         title: 'Validation Error',
         description: 'Current password is required',
@@ -240,10 +240,12 @@ const Profile = () => {
     try {
       setChangingPassword(true);
 
-      const payload = {
-        currentPassword: passwordData.currentPassword,
-        newPassword: passwordData.newPassword,
-      };
+      const payload = user.must_change_password
+        ? { newPassword: passwordData.newPassword }
+        : {
+            currentPassword: passwordData.currentPassword,
+            newPassword: passwordData.newPassword,
+          };
 
       const response = await axios.post(
         `${API_BASE_URL}/auth/change-password`,
@@ -516,17 +518,18 @@ const Profile = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="current-password">Current Password</Label>
-                <Input
-                  id="current-password"
-                  type="password"
-                  value={passwordData.currentPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                  placeholder={user.must_change_password ? 'Enter your temporary password' : 'Enter current password'}
-                  autoFocus={user.must_change_password}
-                />
-              </div>
+              {!user.must_change_password && (
+                <div className="space-y-2">
+                  <Label htmlFor="current-password">Current Password</Label>
+                  <Input
+                    id="current-password"
+                    type="password"
+                    value={passwordData.currentPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                    placeholder="Enter current password"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="new-password">New Password</Label>
                 <Input
@@ -535,6 +538,7 @@ const Profile = () => {
                   value={passwordData.newPassword}
                   onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
                   placeholder="Enter new password (min 6 characters)"
+                  autoFocus={user.must_change_password}
                 />
               </div>
               <div className="space-y-2">

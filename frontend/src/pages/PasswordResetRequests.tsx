@@ -71,12 +71,13 @@ const PasswordResetRequests = () => {
   }, [fetchRequests]);
 
   const generateRandomPassword = () => {
-    const length = 10;
-    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%';
-    let password = '';
-    for (let i = 0; i < length; i++) {
-      password += charset.charAt(Math.floor(Math.random() * charset.length));
-    }
+    // Avoid visually ambiguous characters and punctuation that is easy to
+    // mistype when an administrator shares a temporary code by phone.
+    const length = 12;
+    const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const randomValues = new Uint32Array(length);
+    window.crypto.getRandomValues(randomValues);
+    const password = Array.from(randomValues, value => charset[value % charset.length]).join('');
     setTemporaryPassword(password);
   };
 
