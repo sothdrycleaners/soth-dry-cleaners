@@ -553,24 +553,36 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     const hashedNewPassword = await bcrypt.hash(newPassword, 10);
     
     // Update password and clear must_change_password flag
-    await query(
+    const passwordUpdateResult = await query(
       `UPDATE users
        SET password = $1,
            must_change_password = FALSE,
            temporary_password_login_attempts = 0,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [hashedNewPassword, userId]
+       WHERE id = $2 AND tenant_id = $3
+       RETURNING id`,
+      [hashedNewPassword, userId, req.user!.tenant_id || config.tenancy.deploymentTenantId]
     );
+
+    if (passwordUpdateResult.rows.length !== 1) {
+      console.error(`Password change did not update a user row for user ${userId}`);
+      return res.status(409).json({ error: 'Password was not saved. Please sign in again and retry.' });
+    }
     
     console.log(`✅ Password changed successfully for user ${userId}`);
     
     // Log password change event
-    await query(
-      `INSERT INTO activity_logs (user_id, action, details)
-       VALUES ($1, $2, $3)`,
-      [userId, 'password_changed', JSON.stringify({ changed_at: new Date() })]
-    );
+    try {
+      await query(
+        `INSERT INTO activity_logs (user_id, action, details)
+         VALUES ($1, $2, $3)`,
+        [userId, 'password_changed', JSON.stringify({ changed_at: new Date() })]
+      );
+    } catch (logError) {
+      // Do not report a password-save failure if the credential was already
+      // changed but the optional audit table has an incompatible schema.
+      console.warn('Password changed, but activity logging failed:', logError);
+    }
     
     res.json({
       message: 'Password changed successfully'
