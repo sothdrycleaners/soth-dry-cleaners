@@ -119,7 +119,7 @@ export default function Login() {
 
   return (
     <div 
-      className="auth-page-enter h-screen overflow-hidden flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-secondary/10 p-2 sm:p-4 overscroll-none"
+      className="auth-page-enter relative h-[100dvh] min-h-0 overflow-hidden flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-secondary/10 p-2 sm:p-4 lg:p-3 overscroll-none"
       style={{ touchAction: 'manipulation' }}
     >
       {/* Animated background elements */}
@@ -129,12 +129,12 @@ export default function Login() {
       </div>
 
       <div 
-        className="w-full max-w-md relative z-10 max-h-full select-none"
+        className="w-full max-w-md lg:max-w-sm relative z-10 max-h-full select-none"
         style={{ touchAction: 'manipulation' }}
       >
         {/* Logo and Brand */}
-        <div className="text-center mb-3 sm:mb-6 animate-in fade-in slide-in-from-top duration-700">
-          <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl shadow-lg mb-2 sm:mb-3 overflow-hidden bg-white dark:bg-neutral-950 border border-border">
+        <div className="text-center mb-3 sm:mb-6 lg:mb-3 animate-in fade-in slide-in-from-top duration-700">
+          <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 lg:w-14 lg:h-14 rounded-xl sm:rounded-2xl shadow-lg mb-2 sm:mb-3 lg:mb-2 overflow-hidden bg-white dark:bg-neutral-950 border border-border">
             <img
               src={lushLogoLight}
               alt="Lush Laundry"
@@ -146,7 +146,7 @@ export default function Login() {
               className="hidden dark:block w-full h-full object-contain p-1"
             />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-1">
+          <h1 className="text-2xl sm:text-3xl lg:text-xl font-bold leading-tight text-foreground mb-1">
             Lush Drycleaners & Laundromat ERP
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground flex items-center justify-center gap-1.5">
@@ -158,14 +158,14 @@ export default function Login() {
 
         {/* Login Card */}
         <Card className="shadow-2xl border-2 animate-in fade-in slide-in-from-bottom duration-700 delay-300">
-          <CardHeader className="space-y-1 pb-3 sm:pb-4">
-            <CardTitle className="text-lg sm:text-xl font-bold text-center">Welcome Back</CardTitle>
+          <CardHeader className="space-y-1 pb-3 sm:pb-4 lg:pb-3">
+            <CardTitle className="text-lg sm:text-xl lg:text-lg font-bold text-center">Welcome Back</CardTitle>
             <CardDescription className="text-center text-xs sm:text-sm">
               Sign in to manage your laundry operations
             </CardDescription>
           </CardHeader>
-          <CardContent className="px-3 sm:px-6 pb-4 sm:pb-6">
-            <form onSubmit={handleSubmit} className="space-y-3">
+          <CardContent className="px-3 sm:px-6 lg:px-5 pb-4 sm:pb-6 lg:pb-4">
+            <form onSubmit={handleSubmit} className="space-y-3 lg:space-y-2.5">
               {error && (
                 <Alert variant="destructive" className="animate-in slide-in-from-top py-2">
                   <AlertDescription className="text-xs sm:text-sm break-words">{error}</AlertDescription>
@@ -173,7 +173,7 @@ export default function Login() {
               )}
 
               <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-xs sm:text-sm">Email Address</Label>
+                <Label htmlFor="email" className="text-xs sm:text-sm lg:text-xs">Email Address</Label>
                 <div className="relative">
                   <Mail className="absolute left-2.5 sm:left-3 top-2.5 sm:top-3 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -182,7 +182,7 @@ export default function Login() {
                     placeholder="your@email.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-8 sm:pl-10 h-9 sm:h-10 text-xs sm:text-sm"
+                    className="pl-8 sm:pl-10 h-9 sm:h-10 lg:h-9 text-xs sm:text-sm lg:text-xs"
                     required
                     disabled={loading || !!lockedUntil}
                   />
@@ -191,7 +191,7 @@ export default function Login() {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-xs sm:text-sm">Password</Label>
+                  <Label htmlFor="password" className="text-xs sm:text-sm lg:text-xs">Password</Label>
                   <Link 
                     to="/forgot-password" 
                     className="text-[10px] sm:text-xs text-primary hover:underline"
@@ -207,7 +207,7 @@ export default function Login() {
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-8 sm:pl-10 pr-9 h-9 sm:h-10 text-xs sm:text-sm"
+                    className="pl-8 sm:pl-10 pr-9 h-9 sm:h-10 lg:h-9 text-xs sm:text-sm lg:text-xs"
                     required
                     disabled={loading || !!lockedUntil}
                   />
@@ -228,7 +228,7 @@ export default function Login() {
 
               <Button
                 type="submit"
-                className="w-full h-9 sm:h-10 text-xs sm:text-sm font-semibold mt-4"
+                className="w-full h-9 sm:h-10 lg:h-9 text-xs sm:text-sm lg:text-xs font-semibold mt-4"
                 disabled={loading || !!lockedUntil}
               >
                 {loading ? (
@@ -245,7 +245,7 @@ export default function Login() {
             </form>
 
             {/* Create Account Link */}
-            <div className="mt-3 sm:mt-4 text-center space-y-1.5 sm:space-y-2">
+            <div className="mt-3 sm:mt-4 lg:mt-3 text-center space-y-1.5 sm:space-y-2 lg:space-y-1.5">
               <Separator />
               <p className="text-[10px] sm:text-xs text-muted-foreground pt-1">
                 Don't have an account?
@@ -253,7 +253,7 @@ export default function Login() {
               <Link to="/create-account">
                 <Button 
                   variant="outline" 
-                  className="w-full h-9 sm:h-10 text-xs sm:text-sm"
+                  className="w-full h-9 sm:h-10 lg:h-9 text-xs sm:text-sm lg:text-xs"
                   disabled={loading}
                 >
                   <UserPlus className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
@@ -265,7 +265,7 @@ export default function Login() {
         </Card>
 
         {/* Footer */}
-        <p className="text-center text-[10px] sm:text-xs text-muted-foreground mt-2 sm:mt-4 animate-in fade-in delay-700">
+        <p className="text-center text-[10px] sm:text-xs text-muted-foreground mt-2 sm:mt-4 lg:mt-2 animate-in fade-in delay-700">
           © 2026 Lushlaundromat
         </p>
       </div>
