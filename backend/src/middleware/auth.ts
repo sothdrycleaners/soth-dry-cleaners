@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
 import { query } from '../config/database';
-import { UserRole } from '../models/User';
+import { UserRole, UserStatus } from '../models/User';
 import { isSystemAdminEmail } from '../utils/systemAdmin';
 
 export interface AuthRequest extends Request {
@@ -46,9 +46,9 @@ export const authenticate = async (
       }
       
       // Handle both old (userId) and new (id) token formats for backward compatibility
-      const userId = decoded.id || decoded.userId;
+      const userId = Number(decoded.id || decoded.userId);
       
-      if (!userId) {
+      if (!Number.isSafeInteger(userId) || userId <= 0) {
         console.error('❌ No user ID found in token');
         return res.status(401).json({ error: 'Invalid token format' });
       }
@@ -66,14 +66,33 @@ export const authenticate = async (
 
       try {
         const live = await query(
-          'SELECT branch_id FROM users WHERE id = $1 AND tenant_id = $2',
-          [userId, req.tenant?.id]
+          `SELECT id, email, full_name, role, status, tenant_id, branch_id
+           FROM users
+           WHERE id = $1 AND tenant_id = $2
+           LIMIT 1`,
+          [userId, req.tenant?.id ?? config.tenancy.deploymentTenantId]
         );
-        if (live.rows[0] && live.rows[0].branch_id != null) {
-          req.user.branch_id = live.rows[0].branch_id;
+        const currentUser = live.rows[0];
+
+        if (!currentUser || currentUser.status !== UserStatus.ACTIVE) {
+          return res.status(401).json({ error: 'Your account is inactive. Contact an administrator.' });
         }
-      } catch {
-        // Keep the token value if the lookup fails
+
+        // Trust live authorization data, never role/status claims cached in a JWT.
+        req.user = {
+          id: Number(currentUser.id),
+          email: currentUser.email,
+          full_name: currentUser.full_name,
+          role: currentUser.role as UserRole,
+          tenant_id: Number(currentUser.tenant_id),
+          is_system_admin: isSystemAdminEmail(currentUser.email),
+          branch_id: currentUser.branch_id == null ? null : Number(currentUser.branch_id),
+        };
+      } catch (error) {
+        // Fail closed rather than authorizing stale claims if account status
+        // could not be verified.
+        console.error('Unable to verify the current account status:', error);
+        return res.status(503).json({ error: 'Unable to verify your account. Please try again.' });
       }
       
       next();
