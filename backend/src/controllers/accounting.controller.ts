@@ -156,8 +156,11 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
     const netRevenue = (Number(revenueResult.rows[0].earned_revenue) || 0) - totalRefunds;
     const totalExpenses = parseFloat(totalExpensesResult.rows[0].total_expenses);
     const totalSalaries = parseFloat(salariesResult.rows[0].total_salaries);
-    const grossProfit = netRevenue - totalExpenses;
-    const netProfit = grossProfit - totalSalaries;
+    // Direct service costs are not currently posted to a COGS ledger. Keep
+    // operating expenses and payroll below gross profit in the statement.
+    const costOfGoodsSold = 0;
+    const grossProfit = netRevenue - costOfGoodsSold;
+    const netProfit = grossProfit - totalExpenses - totalSalaries;
 
     // VAT Summary (separate tracking)
     const vatResult = await query(`
@@ -180,6 +183,7 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
     res.json({
       period: period || `${from_date} to ${to_date}`,
       revenue_basis: 'delivered_service_value_excluding_vat_less_refunds',
+      cost_of_goods_sold_basis: 'not_separately_tracked',
       revenue: {
         total: netRevenue, // UI + exports expect revenue.total
         gross_payments: totalPayments,
@@ -243,22 +247,15 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
       FROM inventory_items
     `);
 
-    // LIABILITIES
-    // 1. Accounts Payable (pending/unpaid expenses)
-    const accountsPayableResult = await query(`
-      SELECT COALESCE(SUM(amount), 0) as accounts_payable
-      FROM expenses
-      WHERE COALESCE(status, approval_status) IN ('PENDING', 'APPROVED')
-        AND expense_date <= $1
-    `, [as_of_date]);
-
     const totalAssets =
       parseFloat(accountsReceivableResult.rows[0].accounts_receivable) +
       parseFloat(inventoryResult.rows[0].inventory_value);
 
-    // Unpaid payroll accrual cannot be derived reliably from the current payroll
-    // tables because they store payments but not an accrued-by-date ledger.
-    const totalLiabilities = Number(accountsPayableResult.rows[0].accounts_payable) || 0;
+    // Expenses are recognized as paid when approved in this workflow. There is
+    // no separate supplier/employee settlement ledger for accounts payable.
+    // Unpaid payroll accruals likewise cannot be derived from salary payments.
+    const accountsPayable: number | null = null;
+    const totalLiabilities = 0;
 
     const customerAdvancesResult = await query(`
       SELECT COALESCE(SUM(GREATEST(0, COALESCE(o.amount_paid, 0))), 0) AS customer_advances
@@ -274,7 +271,7 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
     res.json({
       as_of_date,
       equity_basis: 'derived_residual',
-      note: 'Partial operational snapshot: opening cash, unpaid payroll, owner capital, and opening balances are not tracked; approved expenses are treated as paid on their expense date, with no separate settlement ledger. Inventory is current rather than historical. Equity is a derived residual, not a posted ledger balance.',
+      note: 'Partial operational snapshot: opening cash, accounts payable, unpaid payroll, owner capital, and opening balances are not tracked. Approved expenses are treated as paid on their expense date. Inventory is current rather than historical. Equity is a derived residual, not a posted ledger balance.',
       assets: {
         current_assets: {
           cash: null,
@@ -290,7 +287,7 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
       },
       liabilities: {
         current_liabilities: {
-          accounts_payable: parseFloat(accountsPayableResult.rows[0].accounts_payable),
+          accounts_payable: accountsPayable,
           accrued_salaries: null,
           customer_advances: customerAdvances,
           total: liabilitiesWithAdvances,
@@ -345,6 +342,12 @@ export const getCashFlowStatement = async (req: AuthRequest, res: Response) => {
       switch (period) {
         case 'all':
           dateFilter = '';
+          break;
+        case 'today':
+          dateFilter = "WHERE DATE(created_at) = CURRENT_DATE";
+          break;
+        case 'week':
+          dateFilter = "WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'";
           break;
         case 'month':
           dateFilter = "WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)";
@@ -596,12 +599,28 @@ export const getAgedReceivables = async (req: AuthRequest, res: Response) => {
  */
 export const getFinancialRatios = async (req: AuthRequest, res: Response) => {
   try {
-    const { period = 'all' } = req.query;
+    const { period = 'all', from_date, to_date } = req.query;
 
     let dateFilter = '';
-    switch (period) {
+    if (period === 'custom') {
+      const validRange = typeof from_date === 'string'
+        && typeof to_date === 'string'
+        && /^\d{4}-\d{2}-\d{2}$/.test(from_date)
+        && /^\d{4}-\d{2}-\d{2}$/.test(to_date)
+        && from_date <= to_date;
+      if (!validRange) {
+        return res.status(400).json({ error: 'Valid from_date and to_date are required' });
+      }
+      dateFilter = `WHERE delivered_at >= DATE '${from_date}' AND delivered_at < DATE '${to_date}' + INTERVAL '1 day'`;
+    } else switch (period) {
       case 'all':
         dateFilter = '';
+        break;
+      case 'today':
+        dateFilter = 'WHERE DATE(delivered_at) = CURRENT_DATE';
+        break;
+      case 'week':
+        dateFilter = "WHERE delivered_at >= CURRENT_DATE - INTERVAL '7 days'";
         break;
       case 'month':
         dateFilter = "WHERE DATE_TRUNC('month', delivered_at) = DATE_TRUNC('month', CURRENT_DATE)";
@@ -631,20 +650,23 @@ export const getFinancialRatios = async (req: AuthRequest, res: Response) => {
         (SELECT COALESCE(SUM(GREATEST(0, COALESCE(o.total_amount, o.total, 0) - COALESCE(o.amount_paid, 0))), 0)
          FROM orders o WHERE o.status = 'delivered' AND o.payment_status IN ('UNPAID', 'PARTIAL')) AS assets
     `);
-    const liabilitiesResult = await query(`SELECT COALESCE(SUM(amount), 0) as liabilities FROM expenses WHERE COALESCE(status, approval_status) IN ('PENDING', 'APPROVED')`);
+    // This workflow treats an approved expense as settled; there is no separate
+    // accounts-payable ledger, so don't present expense claims as payables.
+    const liabilities = 0;
 
     const revenue = parseFloat(revenueResult.rows[0].revenue);
     const expenses = parseFloat(expensesResult.rows[0].expenses);
     const salaries = parseFloat(salariesResult.rows[0].salaries);
     const netProfit = revenue - expenses - salaries;
     const assets = parseFloat(assetsResult.rows[0].assets);
-    const liabilities = parseFloat(liabilitiesResult.rows[0].liabilities);
     const equity = assets - liabilities;
 
     res.json({
       period,
       profitability_ratios: {
-        gross_profit_margin: revenue > 0 ? (((revenue - expenses) / revenue) * 100).toFixed(2) : '0.00',
+        gross_profit_margin: null,
+        gross_profit_margin_note: 'Cost of goods sold is not separately tracked; operating expenses are not a substitute for COGS.',
+        operating_profit_margin: revenue > 0 ? (((revenue - expenses) / revenue) * 100).toFixed(2) : '0.00',
         net_profit_margin: revenue > 0 ? ((netProfit / revenue) * 100).toFixed(2) : '0.00',
         return_on_assets: assets > 0 ? ((netProfit / assets) * 100).toFixed(2) : '0.00',
         return_on_equity: equity > 0 ? ((netProfit / equity) * 100).toFixed(2) : '0.00',
@@ -673,7 +695,7 @@ export const getFinancialRatios = async (req: AuthRequest, res: Response) => {
  */
 export const getBranchSummary = async (req: AuthRequest, res: Response) => {
   try {
-    const { period = 'all', year } = req.query;
+    const { period = 'all', year, from_date, to_date } = req.query;
     const selectedYear = typeof year === 'string' ? Number(year) : NaN;
     const hasSelectedYear = Number.isInteger(selectedYear) && selectedYear >= 2000;
     const yearStart = hasSelectedYear ? `${selectedYear}-01-01` : '';
@@ -683,7 +705,21 @@ export const getBranchSummary = async (req: AuthRequest, res: Response) => {
     let expenseDateSql = 'TRUE';
     let orderDateSql = 'TRUE';
 
-    switch (period) {
+    if (period === 'custom') {
+      const validRange = typeof from_date === 'string'
+        && typeof to_date === 'string'
+        && /^\d{4}-\d{2}-\d{2}$/.test(from_date)
+        && /^\d{4}-\d{2}-\d{2}$/.test(to_date)
+        && from_date <= to_date;
+      if (!validRange) {
+        return res.status(400).json({ error: 'Valid from_date and to_date are required' });
+      }
+      paymentDateSql = `p.payment_date >= DATE '${from_date}' AND p.payment_date < DATE '${to_date}' + INTERVAL '1 day'`;
+      expenseDateSql = `e.expense_date >= DATE '${from_date}' AND e.expense_date < DATE '${to_date}' + INTERVAL '1 day'`;
+      orderDateSql = `o.delivered_at >= DATE '${from_date}' AND o.delivered_at < DATE '${to_date}' + INTERVAL '1 day'`;
+    }
+
+    if (period !== 'custom') switch (period) {
       case 'today':
         paymentDateSql = "DATE(p.payment_date) = CURRENT_DATE";
         expenseDateSql = "DATE(e.expense_date) = CURRENT_DATE";
@@ -774,7 +810,7 @@ export const getBranchSummary = async (req: AuthRequest, res: Response) => {
     });
 
     res.json({
-      period,
+      period: period === 'custom' ? `${from_date} to ${to_date}` : period,
       overall: {
         revenue: branches.reduce((s: number, b: any) => s + b.revenue, 0),
         expenses: branches.reduce((s: number, b: any) => s + b.expenses, 0),

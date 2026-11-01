@@ -95,7 +95,7 @@ interface BalanceSheet {
   };
   liabilities: {
     current_liabilities: {
-      accounts_payable: number;
+      accounts_payable: number | null;
       accrued_salaries: number | null;
       customer_advances?: number;
     };
@@ -511,7 +511,7 @@ export default function Accounting() {
           [{ content: 'RECORDED ASSETS (PARTIAL)', colSpan: 2, styles: { fillColor: [37, 99, 235] as [number, number, number], textColor: 255, fontStyle: 'bold' as const } }],
           ['', formatAmount(balanceData.assets.total_assets || 0)],
           [{ content: 'LIABILITIES', colSpan: 2, styles: { fillColor: [239, 68, 68] as [number, number, number], textColor: 255, fontStyle: 'bold' as const } }],
-          ['Accounts Payable', formatAmount(balanceData.liabilities.current_liabilities.accounts_payable || 0)],
+          ['Accounts Payable', balanceData.liabilities.current_liabilities.accounts_payable === null ? 'Not tracked' : formatAmount(balanceData.liabilities.current_liabilities.accounts_payable)],
           ['Accrued Salaries', balanceData.liabilities.current_liabilities.accrued_salaries === null ? 'Not tracked' : formatAmount(balanceData.liabilities.current_liabilities.accrued_salaries || 0)],
           [{ content: 'TOTAL LIABILITIES', colSpan: 2, styles: { fillColor: [239, 68, 68] as [number, number, number], textColor: 255, fontStyle: 'bold' as const } }],
           ['', formatAmount(balanceData.liabilities.total_liabilities || 0)],
@@ -887,7 +887,7 @@ export default function Accounting() {
                     <p className="text-sm text-muted-foreground">
                       Period: {incomeStatement.period}
                     </p>
-                    <p className="text-xs text-muted-foreground">Revenue is recognized when an order is delivered, excludes VAT, and reflects refunds recorded in the period.</p>
+                    <p className="text-xs text-muted-foreground">Revenue is recognized when an order is delivered, excludes VAT, and reflects refunds recorded in the period. Cost of goods sold is not tracked separately, so gross profit currently equals revenue; approved expenses and paid salaries are deducted below for net profit.</p>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
@@ -1104,7 +1104,7 @@ export default function Accounting() {
                           <div className="space-y-1 pl-4">
                             <div className="flex justify-between text-sm">
                               <span>Accounts Payable</span>
-                              <span>{formatUGX(balanceSheet.liabilities.current_liabilities.accounts_payable)}</span>
+                              <span>{balanceSheet.liabilities.current_liabilities.accounts_payable === null ? 'Not tracked' : formatUGX(balanceSheet.liabilities.current_liabilities.accounts_payable)}</span>
                             </div>
                             <div className="flex justify-between text-sm">
                               <span>Accrued Salaries</span>
