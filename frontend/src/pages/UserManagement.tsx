@@ -132,9 +132,12 @@ const UserManagement = () => {
   const { toast } = useToast();
   
   const [users, setUsers] = useState<User[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<User[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [statistics, setStatistics] = useState<Statistics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingUsersLoading, setPendingUsersLoading] = useState(false);
+  const [pendingUsersError, setPendingUsersError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('all-users');
   
   // Filters
@@ -184,14 +187,14 @@ const UserManagement = () => {
   const [temporaryPassword, setTemporaryPassword] = useState<string>('');
 
   // Fetch data
-  const fetchUsers = useCallback(async () => {
+  const fetchUsers = useCallback(async (options: { resetFilters?: boolean } = {}) => {
     try {
       setLoading(true);
       const params: Record<string, string> = {};
-      if (statusFilter !== 'all') params.status = statusFilter;
-      if (roleFilter !== 'all') params.role = roleFilter;
-      if (searchQuery) params.search = searchQuery;
-      params.page = currentPage.toString();
+      if (!options.resetFilters && statusFilter !== 'all') params.status = statusFilter;
+      if (!options.resetFilters && roleFilter !== 'all') params.role = roleFilter;
+      if (!options.resetFilters && searchQuery) params.search = searchQuery;
+      params.page = options.resetFilters ? '1' : currentPage.toString();
       params.limit = usersPerPage.toString();
       
       const response = await axios.get(`${API_BASE_URL}/admin/users`, {
@@ -213,6 +216,29 @@ const UserManagement = () => {
       setLoading(false);
     }
   }, [statusFilter, roleFilter, searchQuery, currentPage, token, toast]);
+
+  const fetchPendingUsers = useCallback(async (silent = false) => {
+    try {
+      setPendingUsersLoading(true);
+      setPendingUsersError(null);
+      const response = await axios.get(`${API_BASE_URL}/admin/users/pending`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setPendingUsers(response.data.users || []);
+    } catch (error) {
+      console.error('Error fetching pending users:', error);
+      setPendingUsersError('Could not load pending user approvals. Check your connection and try again.');
+      if (!silent) {
+        toast({
+          title: 'Error',
+          description: 'Failed to fetch pending user approvals',
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setPendingUsersLoading(false);
+    }
+  }, [token, toast]);
 
   const fetchStatistics = useCallback(async () => {
     try {
@@ -289,11 +315,27 @@ const UserManagement = () => {
   useEffect(() => {
     if (canManageUsers) {
       fetchUsers();
+      fetchPendingUsers();
       fetchStatistics();
       fetchActivityLogs();
       fetchBranchOptions();
     }
-  }, [canManageUsers, fetchUsers, fetchStatistics, fetchActivityLogs, fetchBranchOptions]);
+  }, [canManageUsers, fetchUsers, fetchPendingUsers, fetchStatistics, fetchActivityLogs, fetchBranchOptions]);
+
+  // Refresh the approval queue while it is visible so registrations made after
+  // this page loaded appear without requiring a manual browser refresh.
+  useEffect(() => {
+    if (!canManageUsers || activeTab !== 'pending') return;
+
+    void fetchPendingUsers();
+    void fetchStatistics();
+    const refreshTimer = window.setInterval(() => {
+      void fetchPendingUsers(true);
+      void fetchStatistics();
+    }, 15000);
+
+    return () => window.clearInterval(refreshTimer);
+  }, [activeTab, canManageUsers, fetchPendingUsers, fetchStatistics]);
 
   // Actions
   const handleApproveUser = async () => {
@@ -302,7 +344,7 @@ const UserManagement = () => {
     setUserActionPending('approve');
     
     try {
-      await axios.put(
+      const approvalResponse = await axios.put(
         `${API_BASE_URL}/admin/users/${selectedUser.id}/approve`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
@@ -312,11 +354,18 @@ const UserManagement = () => {
         title: 'Success',
         description: 'User approved successfully with their registration role',
       });
-      setUsers((current) => current.map((user) => user.id === selectedUser.id ? { ...user, status: 'ACTIVE' } : user));
+      const approvedUser = { ...selectedUser, ...approvalResponse.data.user, status: 'ACTIVE' as const };
+      setUsers((current) => [approvedUser, ...current.filter((user) => user.id !== selectedUser.id)]);
+      setPendingUsers((current) => current.filter((user) => user.id !== selectedUser.id));
       
       setShowApproveDialog(false);
       setSelectedUser(null);
-      fetchUsers();
+      setActiveTab('all-users');
+      setStatusFilter('all');
+      setRoleFilter('all');
+      setSearchQuery('');
+      setCurrentPage(1);
+      fetchUsers({ resetFilters: true });
       fetchStatistics();
       fetchActivityLogs();
     } catch (error) {
@@ -349,6 +398,7 @@ const UserManagement = () => {
         description: 'User rejected',
       });
       setUsers((current) => current.map((user) => user.id === selectedUser.id ? { ...user, status: 'REJECTED' } : user));
+      setPendingUsers((current) => current.filter((user) => user.id !== selectedUser.id));
       
       setShowRejectDialog(false);
       setSelectedUser(null);
@@ -1086,13 +1136,22 @@ const UserManagement = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {users.filter(u => u.status === 'PENDING').length === 0 ? (
+                {pendingUsersError ? (
+                  <div className="flex flex-col items-center gap-3 py-8 text-center text-gray-500">
+                    <p>{pendingUsersError}</p>
+                    <Button variant="outline" onClick={() => void fetchPendingUsers()} disabled={pendingUsersLoading}>
+                      {pendingUsersLoading ? 'Retrying…' : 'Retry'}
+                    </Button>
+                  </div>
+                ) : pendingUsersLoading && pendingUsers.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">Loading pending users…</div>
+                ) : pendingUsers.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     No pending users
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {users.filter(u => u.status === 'PENDING').map((user) => (
+                    {pendingUsers.map((user) => (
                       <Card key={user.id} className="border-yellow-200 dark:border-yellow-800">
                         <CardContent className="pt-6">
                           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">

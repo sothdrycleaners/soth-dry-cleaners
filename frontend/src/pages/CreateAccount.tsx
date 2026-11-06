@@ -89,9 +89,9 @@ export default function CreateAccount() {
         }),
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.message || 'Failed to create account');
+        throw new Error(data.error || data.message || 'Failed to create account');
       }
 
       setSuccess(true);
