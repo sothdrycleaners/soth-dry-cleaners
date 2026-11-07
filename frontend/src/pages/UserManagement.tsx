@@ -521,8 +521,17 @@ const UserManagement = () => {
   const handleUpdateBranch = async (user: User, value: string) => {
     const branchId = value === 'none' ? null : Number(value);
     if ((user.branch_id ?? null) === branchId || updatingBranchRef.current !== null) return;
+    const previousBranchId = user.branch_id ?? null;
+    const previousBranchName = user.branch_name ?? null;
+    const branchName = branchId ? branchOptions.find((b) => b.id === branchId)?.name ?? null : null;
     updatingBranchRef.current = user.id;
     setUpdatingBranchUserId(user.id);
+    setUsers((current) => current.map((entry) => entry.id === user.id
+      ? { ...entry, branch_id: branchId, branch_name: branchName }
+      : entry));
+    setSelectedUser((current) => current?.id === user.id
+      ? { ...current, branch_id: branchId, branch_name: branchName }
+      : current);
 
     try {
       await axios.put(
@@ -537,15 +546,13 @@ const UserManagement = () => {
           ? `${user.full_name} now books orders under ${branchOptions.find((b) => b.id === branchId)?.name}.`
           : `${user.full_name} is no longer assigned to a branch.`,
       });
-      const branchName = branchId ? branchOptions.find((b) => b.id === branchId)?.name ?? null : null;
+    } catch (error) {
       setUsers((current) => current.map((entry) => entry.id === user.id
-        ? { ...entry, branch_id: branchId, branch_name: branchName }
+        ? { ...entry, branch_id: previousBranchId, branch_name: previousBranchName }
         : entry));
       setSelectedUser((current) => current?.id === user.id
-        ? { ...current, branch_id: branchId, branch_name: branchName }
+        ? { ...current, branch_id: previousBranchId, branch_name: previousBranchName }
         : current);
-      fetchUsers();
-    } catch (error) {
       const axiosError = error as AxiosError<{ error?: string }>;
       toast({
         title: 'Error',
@@ -948,6 +955,9 @@ const UserManagement = () => {
                                   ))}
                                 </SelectContent>
                               </Select>
+                              {updatingBranchUserId === user.id && (
+                                <span className="mt-1 block text-xs text-muted-foreground">Assigning branch…</span>
+                              )}
                             </TableCell>
                           )}
                           <TableCell>{getStatusBadge(user.status)}</TableCell>

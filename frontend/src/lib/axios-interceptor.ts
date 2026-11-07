@@ -182,6 +182,13 @@ export const setupAxiosInterceptors = () => {
     const isGetRequest = method === 'get';
     const isBlobRequest = response.config?.responseType === 'blob' || response.config?.responseType === 'arraybuffer';
 
+    // Mutations can change records represented by any cached list/detail GET.
+    // Clear successful writes before the caller performs an optimistic refresh.
+    if (!isGetRequest) {
+      clearApiCache();
+      return response;
+    }
+
     if (isGetRequest && !isBlobRequest) {
       const cacheKey = getRequestCacheKey(response.config);
       writeApiCache(cacheKey, response);
