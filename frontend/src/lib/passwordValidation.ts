@@ -49,7 +49,9 @@ export const validatePassword = (password: string): PasswordValidationResult => 
   if (errors.length === 0) {
     if (normalizedPassword.length >= 12) {
       strength = 'strong';
-    } else if (normalizedPassword.length >= 10) {
+    } else {
+      // The backend accepts passwords from 8 characters, so every valid
+      // password must show at least Medium and remain eligible for signup.
       strength = 'medium';
     }
   }

@@ -152,7 +152,7 @@ export default function CreateAccount() {
               Your account has been created and is pending approval from an administrator.
             </p>
             <p className="text-muted-foreground mb-6">
-              The administrator will review your request, approve your account, and assign you an appropriate role (Administrator, Manager, or Desktop Agent) based on your responsibilities.
+              An administrator will review your requested access. Once approved, sign in using the email and password you created here.
             </p>
             <p className="text-sm text-muted-foreground">
               Redirecting to login page...
@@ -381,7 +381,7 @@ export default function CreateAccount() {
               <Alert className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
                 <AlertDescription className="text-sm text-blue-800 dark:text-blue-200">
                   📋 Your account will be reviewed by an administrator before approval.
-                  You'll receive your login credentials once approved.
+                  You can sign in with this email and password after approval.
                 </AlertDescription>
               </Alert>
 
@@ -389,6 +389,7 @@ export default function CreateAccount() {
                 type="submit"
                 className="w-full h-11 text-base font-semibold"
                 disabled={loading}
+                aria-busy={loading}
               >
                 {loading ? (
                   <>
