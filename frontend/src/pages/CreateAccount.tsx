@@ -113,7 +113,7 @@ export default function CreateAccount() {
     
     // Clear password errors when user types
     if (field === 'password') {
-      setPasswordErrors([]);
+      setPasswordErrors(validatePassword(value).errors);
       setError('');
     }
     
@@ -343,7 +343,7 @@ export default function CreateAccount() {
                 
                 {!formData.password && (
                   <p className="text-xs text-muted-foreground">
-                    Must contain: uppercase, lowercase, number, and special character (@$!%*?&)
+                    Use at least 8 characters with uppercase, lowercase, a number, and a symbol from @$!%*?&. Use only letters, numbers, and these symbols.
                   </p>
                 )}
               </div>
