@@ -73,12 +73,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Session timeout constants
 const DEFAULT_INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 const WARNING_TIME = 60 * 1000; // Show warning 60 seconds before timeout
-const TOKEN_KEY = 'lush_token';
-const USER_KEY = 'lush_user';
-const SESSION_TIMEOUT_KEY = 'lush_session_timeout'; // Store user's preferred timeout
-const LAST_ACTIVITY_KEY = 'lush_last_activity';
-const POST_LOGIN_REDIRECT_KEY = 'lush_post_login_redirect';
-const POST_LOGIN_REDIRECT_REASON_KEY = 'lush_post_login_redirect_reason';
+const TOKEN_KEY = 'soth_token';
+const USER_KEY = 'soth_user';
+const SESSION_TIMEOUT_KEY = 'soth_session_timeout'; // Store user's preferred timeout
+const LAST_ACTIVITY_KEY = 'soth_last_activity';
+const POST_LOGIN_REDIRECT_KEY = 'soth_post_login_redirect';
+const POST_LOGIN_REDIRECT_REASON_KEY = 'soth_post_login_redirect_reason';
 // Writing on every scroll/click event would thrash localStorage
 const ACTIVITY_WRITE_INTERVAL = 5 * 1000;
 
@@ -304,6 +304,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     setLoading(false);
   }, [resetInactivityTimer, isSessionStale]);
+
+  // Private profile-picture URLs expire. Refresh the authenticated user on
+  // session restore and periodically while the session remains active.
+  useEffect(() => {
+    if (!token) return;
+
+    let cancelled = false;
+    let refreshing = false;
+    const refreshSignedProfilePicture = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const response = await fetch(API_BASE_URL + '/auth/me', {
+          headers: { Authorization: 'Bearer ' + token },
+        });
+        if (!response.ok || cancelled) return;
+        const payload = await response.json();
+        if (!payload.user || cancelled) return;
+        let previousUser: User = payload.user;
+        try {
+          const stored = localStorage.getItem(USER_KEY);
+          if (stored) previousUser = { ...JSON.parse(stored), ...payload.user };
+        } catch {
+          // Use the fresh authenticated response if local storage is malformed.
+        }
+        setUser(previousUser);
+        localStorage.setItem(USER_KEY, JSON.stringify(previousUser));
+      } catch {
+        // Keep the current session if a background refresh temporarily fails.
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    void refreshSignedProfilePicture();
+    const interval = window.setInterval(() => void refreshSignedProfilePicture(), 12 * 60 * 60 * 1000);
+    window.addEventListener('focus', refreshSignedProfilePicture);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshSignedProfilePicture);
+    };
+  }, [token]);
 
   // A backgrounded tab keeps its token but stops running timers, so re-check
   // whenever the user comes back to the app.

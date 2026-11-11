@@ -1,5 +1,5 @@
 -- Multi-tenant foundation for shared Supabase database
--- Safe defaults keep current Lush Laundry behavior unchanged.
+-- Safe defaults keep current Soth Dry Cleaners behavior unchanged.
 
 CREATE TABLE IF NOT EXISTS tenants (
   id SERIAL PRIMARY KEY,
@@ -16,11 +16,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_single_default
   ON tenants ((is_default))
   WHERE is_default = TRUE;
 
-INSERT INTO tenants (tenant_name, tenant_slug, contact_email, is_default)
-VALUES ('Lush Laundry ERP', 'lush-laundry', 'admin@lushlaundry.com', TRUE)
-ON CONFLICT (tenant_slug) DO UPDATE
-SET is_default = TRUE,
-    updated_at = CURRENT_TIMESTAMP;
+DO $$
+DECLARE
+  soth_tenant_id INTEGER;
+BEGIN
+  INSERT INTO tenants (tenant_name, tenant_slug, contact_email, is_default)
+  VALUES ('Soth Dry Cleaners', 'soth-dry-cleaners', NULL, TRUE)
+  ON CONFLICT (tenant_slug) DO UPDATE
+  SET tenant_name = EXCLUDED.tenant_name,
+      contact_email = EXCLUDED.contact_email,
+      is_default = TRUE,
+      updated_at = CURRENT_TIMESTAMP
+  RETURNING id INTO soth_tenant_id;
+
+  IF soth_tenant_id IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'Expected Soth Dry Cleaners to be tenant ID 1, got %', soth_tenant_id;
+  END IF;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION get_default_tenant_id()
 RETURNS INTEGER
@@ -37,9 +50,7 @@ BEGIN
   LIMIT 1;
 
   IF default_tenant_id IS NULL THEN
-    INSERT INTO tenants (tenant_name, tenant_slug, contact_email, is_default)
-    VALUES ('Lush Laundry ERP', 'lush-laundry', 'admin@lushlaundry.com', TRUE)
-    RETURNING id INTO default_tenant_id;
+    RAISE EXCEPTION 'No default tenant is configured';
   END IF;
 
   RETURN default_tenant_id;
@@ -54,16 +65,15 @@ AS $$
 DECLARE
   tenant_setting TEXT;
 BEGIN
-  tenant_setting := current_setting('app.current_tenant_id', TRUE);
+  tenant_setting := NULLIF(current_setting('app.current_tenant_id', TRUE), '');
 
-  IF tenant_setting IS NOT NULL AND tenant_setting ~ '^[0-9]+$' THEN
-    RETURN tenant_setting::INTEGER;
+  IF tenant_setting IS NULL OR tenant_setting !~ '^[0-9]+$' THEN
+    RETURN NULL;
   END IF;
 
-  RETURN get_default_tenant_id();
+  RETURN tenant_setting::INTEGER;
 END;
 $$;
-
 DO $$
 DECLARE
   table_name TEXT;
@@ -107,7 +117,7 @@ BEGIN
 
     EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS tenant_id INTEGER', table_name);
     EXECUTE format('UPDATE %I SET tenant_id = COALESCE(tenant_id, get_default_tenant_id())', table_name);
-    EXECUTE format('ALTER TABLE %I ALTER COLUMN tenant_id SET DEFAULT get_default_tenant_id()', table_name);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN tenant_id SET DEFAULT app_current_tenant_id()', table_name);
     EXECUTE format('ALTER TABLE %I ALTER COLUMN tenant_id SET NOT NULL', table_name);
 
     constraint_name := format('%s_tenant_id_fkey', table_name);

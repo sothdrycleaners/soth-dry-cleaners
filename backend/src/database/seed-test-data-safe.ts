@@ -35,7 +35,7 @@ async function seedTestDataSafe() {
       return;
     }
 
-    // 1. SEED PRICE ITEMS (Complete Lush Laundry Price List)
+    // 1. SEED PRICE ITEMS (Complete Soth Dry Cleaners Price List)
     console.log('📋 Seeding price items...');
     const priceCount = await query(`SELECT COUNT(*) as count FROM price_items`);
     

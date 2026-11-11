@@ -13,7 +13,7 @@ CREATE INDEX IF NOT EXISTS idx_business_settings_key ON business_settings(settin
 -- Insert default business information
 INSERT INTO business_settings (setting_key, setting_value, updated_at)
 VALUES 
-  ('business_info', '{"name": "Lush Dry Cleaners & Laundromat", "phone": "+256 754 723 614", "email": "info@lushdrycleaners.ug", "location": "Kampala, Uganda", "address": "Plot 123, Kampala Road", "tin": ""}', NOW()),
+  ('business_info', '{"name": "Soth Dry Cleaners", "phone": "", "email": "", "location": "", "address": "", "tin": ""}', NOW()),
   ('business_hours', '{"monday": {"open": "07:00", "close": "21:00", "closed": false}, "tuesday": {"open": "07:00", "close": "21:00", "closed": false}, "wednesday": {"open": "07:00", "close": "21:00", "closed": false}, "thursday": {"open": "07:00", "close": "21:00", "closed": false}, "friday": {"open": "07:00", "close": "21:00", "closed": false}, "saturday": {"open": "07:00", "close": "21:00", "closed": false}, "sunday": {"open": "09:00", "close": "15:00", "closed": false}}', NOW())
 ON CONFLICT DO NOTHING;
 

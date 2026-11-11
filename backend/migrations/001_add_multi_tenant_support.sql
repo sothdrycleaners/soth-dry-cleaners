@@ -160,7 +160,7 @@ CREATE INDEX IF NOT EXISTS idx_fiscal_years_tenant_id ON fiscal_years(tenant_id)
 -- STEP 5: Create Default Tenant from Existing Data
 -- ============================================
 
--- Insert default tenant (Lush Laundry)
+-- Insert default tenant (Soth Dry Cleaners)
 INSERT INTO tenants (
     tenant_key, 
     business_name, 
@@ -169,10 +169,10 @@ INSERT INTO tenants (
     subscription_plan,
     subscription_status
 ) VALUES (
-    'lush-laundry',
-    'Lush Laundry',
-    'lush-laundry',
-    'admin@lushlaundry.com',
+    'soth-dry-cleaners',
+    'Soth Dry Cleaners',
+    'soth-dry-cleaners',
+    'admin@example.com',
     'enterprise',
     'active'
 ) ON CONFLICT (tenant_key) DO NOTHING
@@ -183,7 +183,7 @@ DO $$
 DECLARE
     default_tenant_id INT;
 BEGIN
-    SELECT id INTO default_tenant_id FROM tenants WHERE tenant_key = 'lush-laundry';
+    SELECT id INTO default_tenant_id FROM tenants WHERE tenant_key = 'soth-dry-cleaners';
     
     -- Update all existing records with default tenant_id
     UPDATE users SET tenant_id = default_tenant_id WHERE tenant_id IS NULL;

@@ -4,7 +4,7 @@ async function createOrderDeletionsAudit() {
   const client = new Client({
     user: 'postgres',
     host: 'localhost',
-    database: 'lush_laundry',
+    database: 'soth_dry_cleaners',
     password: '551129',
     port: 5432,
   });

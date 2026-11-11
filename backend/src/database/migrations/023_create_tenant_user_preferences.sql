@@ -34,10 +34,10 @@ DROP POLICY IF EXISTS user_preferences_tenant_isolation_policy
   ON public.user_preferences;
 CREATE POLICY user_preferences_tenant_isolation_policy
   ON public.user_preferences
-  TO lush_app
+  TO soth_app
   USING (tenant_id = app_current_tenant_id())
   WITH CHECK (tenant_id = app_current_tenant_id());
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_preferences TO lush_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_preferences TO soth_app;
 
 COMMIT;

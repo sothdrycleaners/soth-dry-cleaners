@@ -1,5 +1,5 @@
 -- ============================================================
--- LUSH LAUNDRY ERP - PRODUCTION DEPLOYMENT
+-- SOTH DRY CLEANERS ERP - PRODUCTION DEPLOYMENT
 -- Clean Database Setup (No Test Data)
 -- ============================================================
 -- This script creates all tables with proper structure

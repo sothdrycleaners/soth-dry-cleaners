@@ -1,6 +1,6 @@
-# Lush Laundry Frontend
+# Soth Dry Cleaners Frontend
 
-    React + TypeScript frontend for the Lush Laundry ERP system.
+    React + TypeScript frontend for the Soth Dry Cleaners ERP system.
 
     ## 🚀 Tech Stack
 

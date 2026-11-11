@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Mail, ArrowLeft, CheckCircle2, Sparkles } from 'lucide-react';
-import lushLogo from '@/assets/lush_logo.png';
+import sothLogo from '@/assets/SOTH_Logo.png';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -83,14 +83,14 @@ export default function ForgotPassword() {
         {/* Logo and Brand */}
         <div className="text-center mb-8 animate-in fade-in slide-in-from-top duration-700">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl shadow-lg mb-4 overflow-hidden bg-white">
-            <img src={lushLogo} alt="Lush Laundry" className="w-16 h-16 object-contain" />
+            <img src={sothLogo} alt="Soth Dry Cleaners" className="w-16 h-16 object-contain" />
           </div>
           <h1 className="text-4xl font-bold text-foreground mb-2">
-            Lush Laundry ERP
+            Soth Dry Cleaners ERP
           </h1>
           <p className="text-muted-foreground flex items-center justify-center gap-2">
             <Sparkles className="h-4 w-4" />
-            Elegance Begins With Clean
+            Soth Dry Cleaners
             <Sparkles className="h-4 w-4" />
           </p>
         </div>
@@ -165,7 +165,7 @@ export default function ForgotPassword() {
 
         {/* Footer */}
         <p className="text-center text-sm text-muted-foreground mt-6 animate-in fade-in delay-700">
-          © 2026 Lush Laundry - Mbarara, Uganda
+          © 2026 Soth Dry Cleaners - Mbarara, Uganda
         </p>
       </div>
     </div>

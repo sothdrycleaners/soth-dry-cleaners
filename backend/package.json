@@ -1,7 +1,7 @@
 {
-  "name": "lush-laundry-backend",
+  "name": "soth-dry-cleaners-backend",
   "version": "1.0.0",
-  "description": "Backend API for Lush Laundry ERP System",
+  "description": "Backend API for Soth Dry Cleaners ERP System",
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon src/index.ts",

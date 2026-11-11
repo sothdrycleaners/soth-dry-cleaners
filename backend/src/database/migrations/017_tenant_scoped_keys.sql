@@ -4,7 +4,7 @@
 
 BEGIN;
 
--- New rows should inherit the tenant selected for the current request, not always Lush.
+-- New rows should inherit the tenant selected for the current request, not always Soth Dry Cleaners.
 DO $$
 DECLARE
   current_table TEXT;

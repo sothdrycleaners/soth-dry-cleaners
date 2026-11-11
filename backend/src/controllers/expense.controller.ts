@@ -214,7 +214,7 @@ export const getAllExpenses = async (req: AuthRequest, res: Response) => {
        LEFT JOIN users u3 ON e.rejected_by = u3.id
        LEFT JOIN branches b ON e.branch_id = b.id
        ${whereClause}
-       ORDER BY e.expense_date DESC, e.created_at DESC
+       ORDER BY e.expense_date DESC, e.created_at DESC, e.id DESC
        LIMIT $${paramCount++} OFFSET $${paramCount}`,
       values
     );

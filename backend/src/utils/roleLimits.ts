@@ -7,7 +7,7 @@ export const DEFAULT_BARGAIN_LIMITS = {
 export const MAX_DISCOUNT_BY_ROLE = {
   DESKTOP_AGENT: 10,
   MANAGER: 20,
-  ADMIN: 100,
+  ADMIN: 50,
 } as const;
 
 /**

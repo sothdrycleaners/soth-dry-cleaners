@@ -1,11 +1,11 @@
-# Lush Laundry ERP System
+# Soth Dry Cleaners ERP System
 
     A comprehensive ERP system for dry cleaning and laundry businesses, built with modern web technologies.
 
     ## 🏗️ Project Structure
 
     ```
-    lush_laundry/
+    soth_dry_cleaners/
     ├── backend/          # Node.js + Express + PostgreSQL API
 └── frontend/         # React + TypeScript frontend
     - React 18 with TypeScript
@@ -57,7 +57,7 @@
     # Edit .env with your database credentials
 
     # Create PostgreSQL database
-    createdb lush_laundry
+    createdb soth_dry_cleaners
 
     # Run migrations and seed data
     npm run db:reset
@@ -82,11 +82,11 @@ Install dependencies
     ### 3. Default Login Credentials
 
     **Administrator:**
-    - Email: admin@lushlaundry.com
+    - Email: admin@example.com
     - Password: Admin123!
 
     **User:**
-    - Email: user@lushlaundry.com
+    - Email: user@example.com
     - Password: User123!
 
     **⚠️ IMPORTANT:** Change these passwords in production!
@@ -157,4 +157,4 @@ Install dependencies
 
     ---
 
-    Built with ❤️ for Lush Laundry
+    Built with ❤️ for Soth Dry Cleaners

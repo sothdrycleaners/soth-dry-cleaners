@@ -113,8 +113,6 @@ const getMonthBoundaries = (monthString: string) => {
 };
 
 const Expenses = () => {
-  const currentMonthStr = getLocalDateString().slice(0, 7);
-  const initialBoundaries = getMonthBoundaries(currentMonthStr);
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -132,16 +130,32 @@ const Expenses = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [monthlyStats, setMonthlyStats] = useState({ total: 0, count: 0, pending: 0 });
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
+  const [datePreset, setDatePreset] = useState<'all' | 'today' | 'month' | 'custom'>('all');
 
   const [filters, setFilters] = useState({
-    from_date: initialBoundaries.firstDay,
-    to_date: initialBoundaries.lastDay,
+    from_date: '',
+    to_date: '',
     category: '',
     status: '',
     search: '',
     branch_id: '',
   });
+
+  const applyDatePreset = (preset: 'all' | 'today' | 'month') => {
+    setDatePreset(preset);
+    setCurrentPage(1);
+    if (preset === 'all') {
+      setFilters((prev) => ({ ...prev, from_date: '', to_date: '' }));
+      return;
+    }
+    if (preset === 'today') {
+      const today = getLocalDateString();
+      setFilters((prev) => ({ ...prev, from_date: today, to_date: today }));
+      return;
+    }
+    const { firstDay, lastDay } = getMonthBoundaries(getLocalDateString().slice(0, 7));
+    setFilters((prev) => ({ ...prev, from_date: firstDay, to_date: lastDay }));
+  };
 
   const [actionLoading, setActionLoading] = useState<{
     id: number;
@@ -460,35 +474,16 @@ const Expenses = () => {
     <MainLayout title="Expenses" subtitle="Record, review, and report business expenses">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-6">
-        <div className="flex items-center gap-4 w-full sm:w-auto">
-          <div className="flex-1 sm:flex-initial">
-            <Label className="text-sm text-gray-600 dark:text-gray-400">Report period</Label>
-            <Input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => {
-                const monthVal = e.target.value;
-                if (!monthVal) return;
-                setSelectedMonth(monthVal);
-                const { firstDay, lastDay } = getMonthBoundaries(monthVal);
-                setFilters((prev) => ({ ...prev, from_date: firstDay, to_date: lastDay }));
-                setCurrentPage(1);
-              }}
-              className="w-full sm:w-48"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              className="mt-2 w-full sm:w-48"
-              onClick={() => {
-                setSelectedMonth('');
-                setFilters((prev) => ({ ...prev, from_date: '', to_date: '' }));
-                setCurrentPage(1);
-              }}
-            >
-              All time
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Date range</span>
+          <Button type="button" size="sm" variant={datePreset === 'all' ? 'default' : 'outline'}
+            onClick={() => applyDatePreset('all')}>All time</Button>
+          <Button type="button" size="sm" variant={datePreset === 'today' ? 'default' : 'outline'}
+            onClick={() => applyDatePreset('today')}>Today</Button>
+          <Button type="button" size="sm" variant={datePreset === 'month' ? 'default' : 'outline'}
+            onClick={() => applyDatePreset('month')}>This month</Button>
+          <Button type="button" size="sm" variant={datePreset === 'custom' ? 'default' : 'outline'}
+            onClick={() => { setDatePreset('custom'); setCurrentPage(1); }}>Custom dates</Button>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <Button variant="outline" disabled={exportingReport} onClick={() => void createExpensesPdf(false)} className="gap-2">
@@ -583,30 +578,20 @@ const Expenses = () => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            <div>
-              <Label>From Date</Label>
-              <Input
-                type="date"
-                value={filters.from_date}
-                onChange={(e) => {
-                  setSelectedMonth('');
-                  setFilters({ ...filters, from_date: e.target.value });
-                  setCurrentPage(1);
-                }}
-              />
-            </div>
-            <div>
-              <Label>To Date</Label>
-              <Input
-                type="date"
-                value={filters.to_date}
-                onChange={(e) => {
-                  setSelectedMonth('');
-                  setFilters({ ...filters, to_date: e.target.value });
-                  setCurrentPage(1);
-                }}
-              />
-            </div>
+            {datePreset === 'custom' && (
+              <>
+                <div>
+                  <Label>From Date</Label>
+                  <Input type="date" value={filters.from_date}
+                    onChange={(e) => { setFilters((prev) => ({ ...prev, from_date: e.target.value })); setCurrentPage(1); }} />
+                </div>
+                <div>
+                  <Label>To Date</Label>
+                  <Input type="date" value={filters.to_date}
+                    onChange={(e) => { setFilters((prev) => ({ ...prev, to_date: e.target.value })); setCurrentPage(1); }} />
+                </div>
+              </>
+            )}
             <div>
               <Label>Category</Label>
               <Select
@@ -698,7 +683,6 @@ const Expenses = () => {
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Expense Date</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Recorded At</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Category</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Description</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Amount</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Method</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Status</th>
@@ -710,13 +694,13 @@ const Expenses = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
                       Loading...
                     </td>
                   </tr>
                 ) : expenses.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
                       No expenses found
                     </td>
                   </tr>
@@ -740,9 +724,6 @@ const Expenses = () => {
                         <Badge style={{ backgroundColor: expense.category_color }} className="text-white">
                           {expense.category_name}
                         </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-sm max-w-xs dark:text-gray-300">
-                        <p className="truncate">{expense.description}</p>
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-sm dark:text-gray-200">
                         {formatUGX(expense.amount)}

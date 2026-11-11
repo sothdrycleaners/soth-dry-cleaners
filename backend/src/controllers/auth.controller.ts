@@ -10,7 +10,7 @@ import { userNotificationService } from '../services/user-notification.service';
 import { createNotification } from '../services/notification.service';
 import { isSystemAdminEmail } from '../utils/systemAdmin';
 import { getEffectiveBargainLimit } from '../utils/roleLimits';
-import { uploadProfileImageToSupabase } from '../services/supabaseStorage.service';
+import { createProfilePictureAccessUrl, uploadProfileImageToSupabase } from '../services/supabaseStorage.service';
 import { 
   logFailedLogin, 
   logSuccessfulLogin, 
@@ -345,7 +345,6 @@ export const login = async (req: AuthRequest, res: Response) => {
         role: user.role,
         tenant_id: user.tenant_id,
         profile_picture: user.profile_picture,
-        profile_picture_url: user.profile_picture_url,
         is_system_admin: isSystemAdminEmail(user.email),
         branch_id: user.branch_id ?? null
       },
@@ -374,6 +373,10 @@ export const login = async (req: AuthRequest, res: Response) => {
       updatedUser.max_bargain_amount
     );
     updatedUser.max_item_bargain_amount = Number(updatedUser.max_item_bargain_amount) || 0;
+    updatedUser.profile_picture_url = await createProfilePictureAccessUrl(
+      updatedUser.profile_picture_url || updatedUser.profile_picture,
+      updatedUser.tenant_id
+    );
     
     // Auto-cancel any pending password reset requests (user successfully logged in, so they remember their password)
     try {
@@ -425,7 +428,12 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     user.is_system_admin = isSystemAdminEmail(user.email);
     user.max_bargain_amount = getEffectiveBargainLimit(user.role, user.max_bargain_amount);
     user.max_item_bargain_amount = Number(user.max_item_bargain_amount) || 0;
-    user.max_discount_percent = user.role === 'DESKTOP_AGENT' ? 10 : user.role === 'MANAGER' ? 20 : 100;
+    user.profile_picture_url = await createProfilePictureAccessUrl(
+      user.profile_picture_url || user.profile_picture,
+      user.tenant_id
+    );
+    user.max_discount_percent = user.role === 'DESKTOP_AGENT' ? 10 : user.role === 'MANAGER' ? 20 : 50;
+    user.max_item_discount_percent = user.role === 'DESKTOP_AGENT' ? 10 : user.role === 'MANAGER' ? 20 : 100;
     const discountSetting = await query(
       `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
     );
@@ -435,6 +443,8 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         const key = user.role === 'DESKTOP_AGENT' ? 'desktop_agent' : user.role === 'MANAGER' ? 'manager' : 'admin';
         const value = Number(configured[key]);
         if (Number.isFinite(value) && value >= 0 && value <= 100) user.max_discount_percent = value;
+        const itemValue = Number(configured[key + '_item']);
+        if (Number.isFinite(itemValue) && itemValue >= 0 && itemValue <= 100) user.max_item_discount_percent = itemValue;
       } catch {
         // Retain the role default when the setting is malformed.
       }
@@ -627,6 +637,10 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
     
     const updatedUser = result.rows[0];
     updatedUser.is_system_admin = isSystemAdminEmail(updatedUser.email);
+    updatedUser.profile_picture_url = await createProfilePictureAccessUrl(
+      updatedUser.profile_picture_url || updatedUser.profile_picture,
+      config.tenancy.deploymentTenantId
+    );
 
     res.json({
       message: 'Profile updated successfully',
@@ -647,9 +661,9 @@ export const uploadProfilePicture = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
-    const uploadResult = await uploadProfileImageToSupabase(file, userId);
+    const uploadResult = await uploadProfileImageToSupabase(file, userId, config.tenancy.deploymentTenantId);
 
-    // Update user's profile picture in database with persistent URL storage.
+    // Persist the tenant-scoped object path; signed URLs are generated only for authorized responses.
     const result = await query(
       `UPDATE users 
        SET profile_picture = $1,
@@ -657,17 +671,15 @@ export const uploadProfilePicture = async (req: AuthRequest, res: Response) => {
            profile_picture_storage = 'SUPABASE',
            profile_picture_migrated_at = NOW(),
            updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $3
+       WHERE id = $3 AND tenant_id = $4
        RETURNING profile_picture, profile_picture_url`,
-      [uploadResult.publicUrl, uploadResult.publicUrl, userId]
+      [uploadResult.objectPath, uploadResult.objectPath, userId, config.tenancy.deploymentTenantId]
     );
-
-    console.log(`✅ Profile picture updated for user ${userId}: ${uploadResult.publicUrl}`);
-    
+    console.log("Profile picture updated for user " + userId + " in tenant " + config.tenancy.deploymentTenantId);
     res.json({
       message: 'Profile picture uploaded successfully',
       profile_picture: result.rows[0].profile_picture,
-      profile_picture_url: result.rows[0].profile_picture_url
+      profile_picture_url: uploadResult.signedUrl
     });
   } catch (error) {
     console.error('Upload profile picture error:', error);

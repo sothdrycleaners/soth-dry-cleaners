@@ -1,6 +1,6 @@
-# Lush Laundry Backend API
+# Soth Dry Cleaners Backend API
 
-    Backend API for Lush Laundry ERP System built with Node.js, Express, TypeScript, and PostgreSQL.
+    Backend API for Soth Dry Cleaners ERP System built with Node.js, Express, TypeScript, and PostgreSQL.
 
     ## Features
 
@@ -33,7 +33,7 @@
 
     3. Create PostgreSQL database:
     ```sql
-    CREATE DATABASE lush_laundry;
+    CREATE DATABASE soth_dry_cleaners;
     ```
 
     4. Run migrations and seed data:
@@ -106,7 +106,7 @@
     ## Default Admin Account
 
     After seeding, you can login with:
-    - Email: admin@lushlaundry.com
+    - Email: admin@example.com
     - Password: Admin123!
 
     **IMPORTANT:** Change this password immediately in production!

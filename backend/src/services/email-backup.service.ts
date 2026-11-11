@@ -3,7 +3,8 @@ import { query } from '../config/database';
 import { notifyDailyBackupSent, notifyDailyBackupFailed } from './notification.service';
 import PDFDocument from 'pdfkit';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resendApiKey = process.env.RESEND_API_KEY;
+const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 interface DailyBackupData {
   date: string;
@@ -108,7 +109,7 @@ export class EmailBackupService {
 </head>
 <body>
   <div class="header">
-    <h1>🧺 Lush Laundry - Daily Backup Report</h1>
+    <h1>🧺 Soth Dry Cleaners - Daily Backup Report</h1>
     <p>Date: ${new Date(date).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
   </div>
   <div style="padding: 20px;">
@@ -194,7 +195,7 @@ export class EmailBackupService {
     </div>
   </div>
   <div class="footer">
-    <p><strong>Lush Laundry Management System</strong></p>
+    <p><strong>Soth Dry Cleaners Management System</strong></p>
     <p>This is an automated daily backup email. Please keep this for your records.</p>
     <p style="font-size: 12px; color: #9ca3af;">Generated on ${new Date().toLocaleString('en-GB')}</p>
   </div>
@@ -211,7 +212,7 @@ export class EmailBackupService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      doc.fontSize(20).fillColor('#6366f1').text('Lush Laundry — Backup Report', { align: 'center' });
+      doc.fontSize(20).fillColor('#6366f1').text('Soth Dry Cleaners — Backup Report', { align: 'center' });
       const rangeLabel = dataList.length === 1
         ? new Date(dataList[0].date).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
         : `${dataList.length} days combined (catch-up after an earlier failure)`;
@@ -310,6 +311,10 @@ export class EmailBackupService {
   }
 
   async sendDailyBackup(dates?: string[]): Promise<{ success: boolean; message: string; sentTo?: string[] }> {
+    if (!resend) {
+      return { success: false, message: 'Backup email is disabled because RESEND_API_KEY is not configured' };
+    }
+
     try {
       const targetDates = dates && dates.length > 0 ? dates : [new Date().toISOString().split('T')[0]];
       console.log(`📧 Starting backup email generation for: ${targetDates.join(', ')}`);
@@ -347,15 +352,15 @@ export class EmailBackupService {
       const htmlContent = this.formatEmailHTML(latest);
       const pdfBuffer = await this.generatePDFBuffer(dataList);
       const pdfFilename = targetDates.length === 1
-        ? `Lush-Laundry-Backup-${targetDates[0]}.pdf`
-        : `Lush-Laundry-Backup-${targetDates[0]}-to-${targetDates[targetDates.length - 1]}.pdf`;
+        ? `Soth-Dry-Cleaners-Backup-${targetDates[0]}.pdf`
+        : `Soth-Dry-Cleaners-Backup-${targetDates[0]}-to-${targetDates[targetDates.length - 1]}.pdf`;
 
       const subjectDates = targetDates.length === 1
         ? new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
         : `${targetDates.length} days (catch-up)`;
 
       const emailPayload = {
-        from: 'Lush Laundry System <backups@lushlaundromat.com>',
+        from: 'Soth Dry Cleaners System <backups@example.com>',
         to: recipientEmails,
         subject: `🧺 Daily Backup - ${subjectDates}`,
         html: htmlContent,

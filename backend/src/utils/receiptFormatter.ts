@@ -28,9 +28,9 @@ export interface ReceiptContext extends ReceiptTotals {
 }
 
 const businessProfile = {
-  name: process.env.BUSINESS_NAME || 'Lush Dry Cleaners & Laundromat',
+  name: process.env.BUSINESS_NAME || 'Soth Dry Cleaners',
   phone: process.env.BUSINESS_PHONE || '+256700000000',
-  email: process.env.BUSINESS_EMAIL || 'info@lushlaundry.com',
+  email: process.env.BUSINESS_EMAIL || 'info@example.com',
   location: process.env.BUSINESS_LOCATION || 'Kampala, Uganda',
   address: process.env.BUSINESS_ADDRESS || '',
   hours: process.env.BUSINESS_HOURS || 'Mon-Sat: 7:00 AM - 9:00 PM',
@@ -134,23 +134,23 @@ export const buildReceiptClosingMessage = (context: ReceiptContext): string => {
 
   if (context.orderStatus === 'ready') {
     if (context.paymentStatus === 'PAID') {
-      return `\nYour order is ready for pickup and your payment is already complete. Please visit us at your convenience.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Lush Laundry. We appreciate your continued support.`;
+      return `\nYour order is ready for pickup and your payment is already complete. Please visit us at your convenience.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Soth Dry Cleaners. We appreciate your continued support.`;
     }
 
-    return `\nYour order is ready for pickup. Outstanding balance: UGX ${formatMoney(context.balance)}.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Lush Laundry.`;
+    return `\nYour order is ready for pickup. Outstanding balance: UGX ${formatMoney(context.balance)}.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Soth Dry Cleaners.`;
   }
 
   if (context.orderStatus === 'delivered') {
     if (context.paymentStatus === 'PAID') {
-      return `\nYour order has been marked as delivered and your payment is complete. Thank you for your payment and for choosing Lush Laundry.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nWe appreciate your business and look forward to serving you again.`;
+      return `\nYour order has been marked as delivered and your payment is complete. Thank you for your payment and for choosing Soth Dry Cleaners.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nWe appreciate your business and look forward to serving you again.`;
     }
 
-    return `\nYour order has been marked as delivered. Outstanding balance: UGX ${formatMoney(context.balance)}.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Lush Laundry.`;
+    return `\nYour order has been marked as delivered. Outstanding balance: UGX ${formatMoney(context.balance)}.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Soth Dry Cleaners.`;
   }
 
   if (context.paymentStatus === 'PAID') {
-    return `\nYour order has been received and payment has been completed.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Lush Laundry.`;
+    return `\nYour order has been received and payment has been completed.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Soth Dry Cleaners.`;
   }
 
-  return `\nYour order has been received and is being processed. Outstanding balance: UGX ${formatMoney(context.balance)}.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Lush Laundry.`;
+  return `\nYour order has been received and is being processed. Outstanding balance: UGX ${formatMoney(context.balance)}.\n\n${paymentMethods}\n${storagePolicy}\n${businessDetails}\n\nThank you for choosing Soth Dry Cleaners.`;
 };

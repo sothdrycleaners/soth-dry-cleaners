@@ -895,17 +895,14 @@ const UserManagement = () => {
                 ) : users.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">No users found</div>
                 ) : (
-                  <div className="overflow-x-auto">
-                  <Table>
+                  <div className="w-full">
+                  <Table className="w-full table-fixed">
                     <TableHeader>
                       <TableRow>
                         <TableHead>User</TableHead>
-                        <TableHead>Contact</TableHead>
                         <TableHead>Role</TableHead>
                         {multiBranch && <TableHead>Branch</TableHead>}
                         <TableHead>Status</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead>Last Login</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -929,7 +926,6 @@ const UserManagement = () => {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="break-all">{user.phone}</TableCell>
                           <TableCell>
                             <Badge className={getRoleBadgeColor(user.role)}>
                               {user.role}
@@ -961,12 +957,6 @@ const UserManagement = () => {
                             </TableCell>
                           )}
                           <TableCell>{getStatusBadge(user.status)}</TableCell>
-                          <TableCell className="text-sm">
-                            {formatDateTime(user.created_at)}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {user.last_login ? formatDateTime(user.last_login) : 'Never'}
-                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">
                               <Button

@@ -31,7 +31,7 @@ const seedLaundryEmployees = async () => {
         id_number: 'EMP001',
         position: 'Senior Cashier',
         phone: '+256 772 345 678',
-        email: 'grace.cashier@lushlaundry.com',
+        email: 'grace.cashier@example.com',
         salary: 800000, // UGX 800,000/month
         hire_date: '2024-01-15',
         bank_account: '1234567890',

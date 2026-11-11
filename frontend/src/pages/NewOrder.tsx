@@ -102,6 +102,8 @@ interface OrderItem {
   kg_rate?: number;
   /** Per-item bargain given to this customer on this line */
   discount_amount?: number;
+  /** Selected role-authorized percentage discount for this item line */
+  item_discount_percent?: number;
   /** Quantity used when the current bargain was entered */
   discount_basis_quantity?: number;
   /** Bargain amount at the basis quantity */
@@ -181,11 +183,11 @@ function getScaledLineSurcharge(
 }
 
 
-// Administrators are uncapped; the order value is the only ceiling
+// Whole-order percentage defaults stay separate from per-item discount caps.
 const MAX_DISCOUNT_BY_ROLE: Record<string, number> = {
   DESKTOP_AGENT: 10,
   MANAGER: 20,
-  ADMIN: 100,
+  ADMIN: 50,
 };
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
@@ -207,6 +209,7 @@ export default function NewOrder() {
   const { token, user } = useAuth();
   const { toast } = useToast();
   const defaultMaxDiscountPercent = MAX_DISCOUNT_BY_ROLE[user?.role ?? 'DESKTOP_AGENT'] ?? 10;
+  const defaultMaxItemDiscountPercent = user?.role === 'ADMIN' ? 100 : user?.role === 'MANAGER' ? 20 : 10;
   const canChooseBranch = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const isAdminUser = user?.role === 'ADMIN';
   const canPriceUp = !!user; // All authenticated staff can apply price-up (surcharge)
@@ -264,6 +267,7 @@ export default function NewOrder() {
   const [maxBargainAmount, setMaxBargainAmount] = useState(0);
   const [maxItemBargainAmount, setMaxItemBargainAmount] = useState(0);
   const [maxDiscountPercent, setMaxDiscountPercent] = useState(defaultMaxDiscountPercent);
+  const [maxItemDiscountPercent, setMaxItemDiscountPercent] = useState(defaultMaxItemDiscountPercent);
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'UNPAID' | 'PARTIAL'>('UNPAID');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'ON_ACCOUNT'>('ON_ACCOUNT');
   const [mobileProvider, setMobileProvider] = useState<'MTN' | 'AIRTEL'>('MTN');
@@ -358,7 +362,7 @@ export default function NewOrder() {
       setStandardKgRate(Number(settings.standard_kg_rate ?? settings.kilogram_rate ?? 10000) || 10000);
       setBusinessPhone(settings.business_phone || '');
       setBusinessInfo({
-        name: settings.business_name || 'LUSH DRY CLEANERS & LAUNDROMAT',
+        name: settings.business_name || 'SOTH DRY CLEANERS',
         phone: settings.business_phone || '',
         email: settings.business_email || '',
         location: settings.business_location || '',
@@ -390,13 +394,18 @@ export default function NewOrder() {
       setMaxDiscountPercent(Number.isFinite(configuredDiscount) && configuredDiscount >= 0
         ? configuredDiscount
         : defaultMaxDiscountPercent);
+      const configuredItemDiscount = Number(response.data.user.max_item_discount_percent);
+      setMaxItemDiscountPercent(Number.isFinite(configuredItemDiscount) && configuredItemDiscount >= 0
+        ? configuredItemDiscount
+        : defaultMaxItemDiscountPercent);
     } catch (error) {
       console.error('Error fetching user bargain limit:', error);
       setMaxBargainAmount(0);
       setMaxItemBargainAmount(0);
       setMaxDiscountPercent(defaultMaxDiscountPercent);
+      setMaxItemDiscountPercent(defaultMaxItemDiscountPercent);
     }
-  }, [defaultMaxDiscountPercent, token]);
+  }, [defaultMaxDiscountPercent, defaultMaxItemDiscountPercent, token]);
 
   useEffect(() => {
     if (token) {
@@ -667,10 +676,31 @@ export default function NewOrder() {
     updated[index] = {
       ...updated[index],
       discount_amount: discount,
+      item_discount_percent: undefined,
       discount_basis_quantity: current.quantity,
       discount_basis_amount: discount,
       discount_scales_with_quantity: shouldScale,
       subtotal: computeLineSubtotal(current.quantity, current.unit_price, discount, current.surcharge_amount || 0),
+    };
+    setOrderItems(updated);
+  };
+
+  const updateItemDiscountPercent = (index: number, percent: number) => {
+    if (percent < 0 || percent > maxItemDiscountPercent) return;
+    const current = orderItems[index];
+    if (!current) return;
+    const quantity = Number(current.quantity) || 1;
+    const gross = Math.round(quantity * Number(current.unit_price));
+    const discount = Math.round(gross * percent / 100);
+    const updated = [...orderItems];
+    updated[index] = {
+      ...current,
+      discount_amount: discount,
+      item_discount_percent: percent > 0 ? percent : undefined,
+      discount_basis_quantity: quantity,
+      discount_basis_amount: discount,
+      discount_scales_with_quantity: true,
+      subtotal: computeLineSubtotal(quantity, current.unit_price, discount, current.surcharge_amount || 0),
     };
     setOrderItems(updated);
   };
@@ -932,7 +962,7 @@ export default function NewOrder() {
 
     try {
       const requestedBargain = Math.max(0, Math.round(bargainAmount));
-      if (!isAdminUser && itemDiscountTotal > maxBargainAmount) {
+      if (itemDiscountTotal > maxBargainAmount) {
         toast({
           variant: 'destructive',
           title: 'Bargain limit exceeded',
@@ -941,7 +971,7 @@ export default function NewOrder() {
         return;
       }
 
-      if (!isAdminUser && requestedBargain > bargainLimitRemaining) {
+      if (requestedBargain > bargainLimitRemaining) {
         toast({
           variant: 'destructive',
           title: 'Bargain limit exceeded',
@@ -1446,8 +1476,29 @@ export default function NewOrder() {
                           </div>
                         ) : (
                           <Label className="text-[11px] text-muted-foreground whitespace-nowrap">
-                            Bargain (UGX)
+                            Item discount (UGX)
                           </Label>
+                        )}
+                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') && maxItemDiscountPercent >= 50 && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            {[50, 100].filter((percent) => percent <= maxItemDiscountPercent).map((percent) => (
+                              <Button
+                                key={percent}
+                                type="button"
+                                size="sm"
+                                variant={item.item_discount_percent === percent ? 'default' : 'outline'}
+                                className="h-7 px-2 text-[10px]"
+                                onClick={() => updateItemDiscountPercent(index, percent)}
+                                title={`Apply ${percent}% discount to this item only`}
+                              >
+                                {percent}%
+                              </Button>
+                            ))}
+                            {item.item_discount_percent !== undefined && (
+                              <Button type="button" size="sm" variant="ghost" className="h-7 px-1.5 text-[10px]"
+                                onClick={() => updateItemDiscountPercent(index, 0)} title="Clear this item discount">Clear</Button>
+                            )}
+                          </div>
                         )}
                         <Input
                           id={canPriceUp ? `item-adj-${index}` : `item-discount-${index}`}
@@ -1607,20 +1658,16 @@ export default function NewOrder() {
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">
-                    Bargain {isAdminUser ? (
-                      <span className="text-muted-foreground/70">(no limit)</span>
-                    ) : maxBargainAmount > 0 ? (
-                      <span className="text-muted-foreground/70">(max {formatUGX(maxBargainAmount)})</span>
-                    ) : null}
+                    Bargain <span className="text-muted-foreground/70">(max {formatUGX(maxBargainAmount)} total)</span>
                   </Label>
                   <Input
                     type="number"
                     min="0"
-                    max={isAdminUser ? undefined : bargainLimitRemaining}
+                    max={bargainLimitRemaining}
                     value={bargainAmount || ''}
                     onChange={(e) => {
                       const value = parseFloat(e.target.value) || 0;
-                      if (isAdminUser || value <= bargainLimitRemaining) {
+                      if (value <= bargainLimitRemaining) {
                         setBargainAmount(value);
                       } else {
                         toast({
@@ -1632,7 +1679,7 @@ export default function NewOrder() {
                     }}
                     placeholder="0"
                     className="h-10 lg:h-8 text-sm mt-1"
-                    disabled={!isAdminUser && bargainLimitRemaining === 0}
+                    disabled={bargainLimitRemaining === 0}
                   />
                 </div>
 

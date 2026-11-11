@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { userNotificationService } from '../services/user-notification.service';
 import { getSystemAdminEmails, isSystemAdminEmail } from '../utils/systemAdmin';
 import { notifyAdministrators } from './notifications.controller';
+import { createProfilePictureAccessUrl } from '../services/supabaseStorage.service';
 
 const getHiddenSystemAdminEmails = (req: AuthRequest): string[] => {
   if (req.user?.is_system_admin) {
@@ -67,7 +68,7 @@ export const getAllUsers = async (req: AuthRequest, res: Response) => {
       SELECT
         u.id, u.email, u.full_name, u.phone, u.role, u.status,
         u.created_at, u.updated_at, u.last_login, u.profile_picture, u.profile_picture_url,
-        u.branch_id, b.name as branch_name,
+        u.tenant_id, u.branch_id, b.name as branch_name,
         c.full_name as created_by_name`;
     const fromClause = `
       FROM users u
@@ -120,10 +121,17 @@ export const getAllUsers = async (req: AuthRequest, res: Response) => {
     params.push(limitNum, offset);
 
     const result = await query(listQuery, params);
+    const users = await Promise.all(result.rows.map(async (user) => ({
+      ...user,
+      profile_picture_url: await createProfilePictureAccessUrl(
+        user.profile_picture_url || user.profile_picture,
+        user.tenant_id
+      ),
+    })));
     
     res.json({
       success: true,
-      users: result.rows,
+      users,
       total,
       page: pageNum,
       totalPages: Math.ceil(total / limitNum)

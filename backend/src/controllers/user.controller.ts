@@ -4,17 +4,32 @@ import bcrypt from 'bcryptjs';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { UserRole, UserStatus } from '../models/User';
+import { getSystemAdminEmails, isSystemAdminEmail } from '../utils/systemAdmin';
+
+const shouldHideSystemAdmin = (req: AuthRequest, email?: string) =>
+  !req.user?.is_system_admin && isSystemAdminEmail(email);
+
+const isHiddenSystemAdminTarget = async (req: AuthRequest, userId: string) => {
+  if (req.user?.is_system_admin) return false;
+  const result = await query(
+    'SELECT email FROM users WHERE id = $1 AND tenant_id = app_current_tenant_id() LIMIT 1',
+    [userId]
+  );
+  return result.rows.length === 0 || isSystemAdminEmail(result.rows[0].email);
+};
 
 export const getAllUsers = async (req: AuthRequest, res: Response) => {
   try {
+    const hiddenEmails = req.user?.is_system_admin ? [] : getSystemAdminEmails();
     const result = await query(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.status,
               u.branch_id, b.name AS branch_name, u.created_at, u.updated_at
        FROM users u
        LEFT JOIN branches b ON b.id = u.branch_id
-       ORDER BY u.created_at DESC`
+       WHERE ($1::text[] = '{}'::text[] OR u.email IS NULL OR LOWER(u.email) != ALL($1::text[]))
+       ORDER BY u.created_at DESC`,
+      [hiddenEmails]
     );
-    
     res.json({ users: result.rows });
   } catch (error) {
     console.error('Get users error:', error);
@@ -35,7 +50,7 @@ export const getUserById = async (req: AuthRequest, res: Response) => {
       [id]
     );
     
-    if (result.rows.length === 0) {
+    if (result.rows.length === 0 || shouldHideSystemAdmin(req, result.rows[0].email)) {
       return res.status(404).json({ error: 'User not found' });
     }
     
@@ -54,6 +69,9 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
     }
     
     const { id } = req.params;
+    if (await isHiddenSystemAdminTarget(req, id)) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     const { email, full_name, phone, branch_id } = req.body;
     
     // Only admins can update other users; users can update themselves
@@ -123,6 +141,9 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
 export const approveUser = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    if (await isHiddenSystemAdminTarget(req, id)) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     
     const result = await query(
       `UPDATE users SET status = $1
@@ -153,6 +174,9 @@ export const changeUserRole = async (req: AuthRequest, res: Response) => {
     }
     
     const { id } = req.params;
+    if (await isHiddenSystemAdminTarget(req, id)) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     const { role } = req.body;
     
     // Prevent changing own role
@@ -184,6 +208,9 @@ export const changeUserRole = async (req: AuthRequest, res: Response) => {
 export const deleteUser = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    if (await isHiddenSystemAdminTarget(req, id)) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     
     // Prevent self-deletion
     if (req.user!.id === parseInt(id)) {

@@ -10,7 +10,7 @@
 -- 3. First real customer will get: CUST20260001
 --
 -- RECOMMENDATION: Create a backup first!
--- Run: pg_dump -U postgres lush_laundry > backup_before_cleanup.sql
+-- Run: pg_dump -U postgres soth_dry_cleaners > backup_before_cleanup.sql
 -- ========================================
 
 BEGIN;
@@ -86,12 +86,12 @@ RAISE NOTICE '🚀 System ready for production data!';
 -- TO EXECUTE THIS CLEANUP:
 -- ========================================
 -- 1. Create backup first:
---    pg_dump -U postgres lush_laundry > backup_before_cleanup.sql
+--    pg_dump -U postgres soth_dry_cleaners > backup_before_cleanup.sql
 --
 -- 2. Uncomment the DELETE section above (remove /* and */)
 --
 -- 3. Run this file:
---    psql -U postgres -d lush_laundry -f clean_test_data_for_production.sql
+--    psql -U postgres -d soth_dry_cleaners -f clean_test_data_for_production.sql
 --
 -- 4. Verify the cleanup worked:
 --    SELECT COUNT(*) FROM customers;  -- Should return 0

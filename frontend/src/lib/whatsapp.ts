@@ -82,7 +82,7 @@ export type BusinessInfo = {
 };
 
 export const DEFAULT_BUSINESS_INFO: BusinessInfo = {
-  name: 'LUSH DRY CLEANERS & LAUNDROMAT',
+  name: 'SOTH DRY CLEANERS',
 };
 
 /** Free days to collect once an item is ready, before storage charges start */
@@ -453,7 +453,7 @@ export function buildOrderWhatsAppMessage(
   } else {
     lines.push('Kindly settle the outstanding balance at your earliest convenience.');
   }
-  lines.push('Thank you for choosing Lush!');
+  lines.push('Thank you for choosing Soth Dry Cleaners!');
 
   lines.push(...buildBusinessFooterLines({ ...business, branch_name: branchName }));
 

@@ -40,7 +40,7 @@ const parseConnectionUrl = (raw: string | undefined) => {
 const databaseConfig = {
   host: parsedDatabaseUrl?.host || process.env.DB_HOST || 'localhost',
   port: parsedDatabaseUrl?.port || parseInt(process.env.DB_PORT || '5432', 10),
-  name: parsedDatabaseUrl?.name || process.env.DB_NAME || 'lush_laundry',
+  name: parsedDatabaseUrl?.name || process.env.DB_NAME || 'soth_dry_cleaners',
   user: parsedDatabaseUrl?.user || process.env.DB_USER || 'postgres',
   password: parsedDatabaseUrl?.password ?? (process.env.DB_PASSWORD || ''),
 };

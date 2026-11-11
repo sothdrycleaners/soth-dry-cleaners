@@ -899,17 +899,14 @@ export default function Payroll() {
           )}
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-          <Table>
+          <div className="w-full">
+          <Table className="w-full table-fixed">
             <TableHeader>
               <TableRow className="bg-muted/50 dark:bg-gray-800">
                 <TableHead className="font-semibold dark:text-gray-100">Employee</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Position</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Branch</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Phone</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Pay Amount</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Bank</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Hire Date</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Status</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Actions</TableHead>
               </TableRow>
@@ -917,7 +914,7 @@ export default function Payroll() {
             <TableBody>
               {paginatedEmployees.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                     No employees found
                   </TableCell>
                 </TableRow>
@@ -932,15 +929,9 @@ export default function Payroll() {
                   </TableCell>
                   <TableCell className="dark:text-gray-100">{employee.position}</TableCell>
                   <TableCell className="dark:text-gray-100">{employee.branch_name || '—'}</TableCell>
-                  <TableCell className="dark:text-gray-100 break-all">{employee.phone}</TableCell>
                   <TableCell className="font-semibold text-green-600">
                     {formatUGX(employee.salary_amount)}
                   </TableCell>
-                  <TableCell className="dark:text-gray-100">
-                    {employee.bank_name || 'N/A'}
-                    {employee.bank_account && <p className="text-xs text-muted-foreground">{employee.bank_account}</p>}
-                  </TableCell>
-                  <TableCell className="dark:text-gray-100">{new Date(employee.hire_date).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <Select
                       value={employee.employment_status}
@@ -1076,6 +1067,7 @@ export default function Payroll() {
                 <div><span className="text-muted-foreground">Employee ID:</span> {selectedEmployee.employee_id_number}</div>
                 <div><span className="text-muted-foreground">Phone:</span> {selectedEmployee.phone || '—'}</div>
                 <div><span className="text-muted-foreground">Email:</span> {selectedEmployee.email || '—'}</div>
+                <div><span className="text-muted-foreground">Bank details:</span> {selectedEmployee.bank_name || '?'}{selectedEmployee.bank_account ? ' ? ' + selectedEmployee.bank_account : ''}</div>
                 <div><span className="text-muted-foreground">Branch:</span> {selectedEmployee.branch_name || '—'}</div>
                 <div><span className="text-muted-foreground">Hire date:</span> {new Date(selectedEmployee.hire_date).toLocaleDateString()}</div>
                 <div><span className="text-muted-foreground">Status:</span> {selectedEmployee.employment_status}</div>
@@ -1083,7 +1075,7 @@ export default function Payroll() {
               <div>
                 <h3 className="font-semibold mb-2">Salary payment history</h3>
                 <div className="rounded-md border overflow-x-auto">
-                  <Table>
+                  <Table className="min-w-[560px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Period</TableHead>
@@ -1264,26 +1256,22 @@ export default function Payroll() {
           </p>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-          <Table>
+          <div className="w-full">
+          <Table className="w-full table-fixed">
             <TableHeader>
               <TableRow className="bg-muted/50 dark:bg-gray-800">
                 <TableHead className="font-semibold dark:text-gray-100">Employee</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Branch</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Period</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Gross Amount</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Deductions</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Bonuses</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Net Amount</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Method</TableHead>
                 <TableHead className="font-semibold dark:text-gray-100">Status</TableHead>
-                <TableHead className="font-semibold dark:text-gray-100">Date</TableHead>
+                <TableHead className="font-semibold dark:text-gray-100">Paid Date</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedPayments.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                     No payment records found
                   </TableCell>
                 </TableRow>
@@ -1296,13 +1284,12 @@ export default function Payroll() {
                       <p className="text-sm text-muted-foreground">{payment.position}</p>
                     </div>
                   </TableCell>
-                  <TableCell className="dark:text-gray-100">{payment.branch_name || '—'}</TableCell>
                   <TableCell className="dark:text-gray-100">{payment.payment_period}</TableCell>
-                  <TableCell className="dark:text-gray-100">{formatUGX(payment.amount_paid)}</TableCell>
-                  <TableCell className="text-red-600">- {formatUGX(payment.deductions)}</TableCell>
-                  <TableCell className="text-green-600">+ {formatUGX(payment.bonuses)}</TableCell>
                   <TableCell className="font-semibold text-blue-600">
                     {formatUGX(payment.net_amount)}
+                    <p className="text-xs font-normal text-muted-foreground">
+                      Gross {formatUGX(payment.amount_paid)} ? Deductions {formatUGX(payment.deductions)} ? Bonuses {formatUGX(payment.bonuses)}
+                    </p>
                   </TableCell>
                   <TableCell className="dark:text-gray-100">{payment.payment_method}</TableCell>
                   <TableCell><Badge variant={payment.payment_status === 'PAID' ? 'default' : 'secondary'}>{payment.payment_status}</Badge></TableCell>

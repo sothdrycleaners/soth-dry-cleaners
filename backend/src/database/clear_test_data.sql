@@ -98,5 +98,5 @@ COMMIT;
 -- 2. First real customer will be CUST20260001, first order ORD20260001
 -- 3. This is SAFE - no foreign key issues because we clear in correct order
 -- 4. Run this ONCE before deployment, NOT on production with real data!
--- 5. Make a backup first: pg_dump lush_laundry > backup.sql
+-- 5. Make a backup first: pg_dump soth_dry_cleaners > backup.sql
 -- =================================================================

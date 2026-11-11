@@ -160,7 +160,10 @@ export default function Settings() {
   const [adminItemLimit, setAdminItemLimit] = useState('10000');
   const [desktopAgentDiscountPercent, setDesktopAgentDiscountPercent] = useState('10');
   const [managerDiscountPercent, setManagerDiscountPercent] = useState('20');
-  const [adminDiscountPercent, setAdminDiscountPercent] = useState('100');
+  const [adminDiscountPercent, setAdminDiscountPercent] = useState('50');
+  const [desktopAgentItemDiscountPercent, setDesktopAgentItemDiscountPercent] = useState('10');
+  const [managerItemDiscountPercent, setManagerItemDiscountPercent] = useState('20');
+  const [adminItemDiscountPercent, setAdminItemDiscountPercent] = useState('100');
   const [savingBargainLimits, setSavingBargainLimits] = useState(false);
 
   // Payment accounts for on-account / partial WhatsApp receipts
@@ -355,7 +358,7 @@ export default function Settings() {
       setBusinessAddress(settings.business_address || '');
       setBusinessPhone(settings.business_phone || '');
       setBusinessEmail(settings.business_email || '');
-      setBusinessName(settings.business_name || 'Lush Dry Cleaners & Laundromat');
+      setBusinessName(settings.business_name || 'Soth Dry Cleaners');
       setBusinessLocation(settings.business_location || '');
       setVatRate(settings.vat_rate || '18.00');
       setStandardKgRate(String(Number(settings.standard_kg_rate ?? settings.kilogram_rate ?? 10000) || 10000));
@@ -391,7 +394,10 @@ export default function Settings() {
       setAdminItemLimit(toLimit(response.data.admin_per_item, 10000));
       setDesktopAgentDiscountPercent(toLimit(response.data.desktop_agent_discount_percent, 10));
       setManagerDiscountPercent(toLimit(response.data.manager_discount_percent, 20));
-      setAdminDiscountPercent(toLimit(response.data.admin_discount_percent, 100));
+      setAdminDiscountPercent(toLimit(response.data.admin_discount_percent, 50));
+      setDesktopAgentItemDiscountPercent(toLimit(response.data.desktop_agent_item_discount_percent, 10));
+      setManagerItemDiscountPercent(toLimit(response.data.manager_item_discount_percent, 20));
+      setAdminItemDiscountPercent(toLimit(response.data.admin_item_discount_percent, 100));
     } catch (error) {
       console.error('Failed to load bargain limits:', error);
     }
@@ -694,21 +700,25 @@ export default function Settings() {
     const desktopAgentDiscount = parsePercent(desktopAgentDiscountPercent);
     const managerDiscount = parsePercent(managerDiscountPercent);
     const adminDiscount = parsePercent(adminDiscountPercent);
+    const desktopAgentItemDiscount = parsePercent(desktopAgentItemDiscountPercent);
+    const managerItemDiscount = parsePercent(managerItemDiscountPercent);
+    const adminItemDiscount = parsePercent(adminItemDiscountPercent);
 
     if (
       desktopAgent === null || manager === null || admin === null ||
       desktopAgentItem === null || managerItem === null || adminItem === null
       || desktopAgentDiscount === null || managerDiscount === null || adminDiscount === null
+      || desktopAgentItemDiscount === null || managerItemDiscount === null || adminItemDiscount === null
     ) {
       toast({
         title: 'Enter valid amounts',
-        description: 'All bargain limits must be whole numbers in UGX (e.g. 5000).',
+        description: 'Enter valid UGX limits and discount percentages from 0 to 100.',
         variant: 'destructive',
       });
       return;
     }
     if (managerDiscount < desktopAgentDiscount || adminDiscount < managerDiscount) {
-      toast({ title: 'Check discount percentages', description: 'Discount percentages must follow Desktop Agent <= Manager <= Administrator.', variant: 'destructive' });
+      toast({ title: 'Check order discount percentages', description: 'Order discount limits must follow Desktop Agent <= Manager <= Administrator.', variant: 'destructive' });
       return;
     }
     if (desktopAgentItem > desktopAgent) {
@@ -743,6 +753,9 @@ export default function Settings() {
           desktop_agent_discount_percent: desktopAgentDiscount,
           manager_discount_percent: managerDiscount,
           admin_discount_percent: adminDiscount,
+          desktop_agent_item_discount_percent: desktopAgentItemDiscount,
+          manager_item_discount_percent: managerItemDiscount,
+          admin_item_discount_percent: adminItemDiscount,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -756,6 +769,9 @@ export default function Settings() {
       setDesktopAgentDiscountPercent(String(desktopAgentDiscount));
       setManagerDiscountPercent(String(managerDiscount));
       setAdminDiscountPercent(String(adminDiscount));
+      setDesktopAgentItemDiscountPercent(String(desktopAgentItemDiscount));
+      setManagerItemDiscountPercent(String(managerItemDiscount));
+      setAdminItemDiscountPercent(String(adminItemDiscount));
 
       toast({
         title: 'Bargain limits updated',
@@ -1041,7 +1057,7 @@ ${discount} on all laundry services!
 
 Valid until: ${promoEndDate ? new Date(promoEndDate).toLocaleDateString('en-GB') : '[End Date]'}
 
-Visit Lush Laundry and enjoy this amazing offer!
+Visit Soth Dry Cleaners and enjoy this amazing offer!
 
 📍 Location: [Your Address]
 📞 Call: [Your Phone]
@@ -1088,7 +1104,7 @@ Don't miss out! ✨`;
       const date = new Date().toISOString().split('T')[0];
       const typeLabel = selectedBackupType === 'all' ? 'full' : selectedBackupType.replace(',', '_');
       const extension = backupFormat === 'pdf' ? 'pdf' : 'json';
-      link.setAttribute('download', `lush_laundry_${typeLabel}_backup_${date}.${extension}`);
+      link.setAttribute('download', `soth_dry_cleaners_${typeLabel}_backup_${date}.${extension}`);
       
       document.body.appendChild(link);
       link.click();
@@ -1318,7 +1334,7 @@ Don't miss out! ✨`;
                   id="businessName"
                   value={businessName}
                   onChange={(e) => setBusinessName(e.target.value)}
-                  placeholder="Lush Dry Cleaners & Laundromat"
+                  placeholder="Soth Dry Cleaners"
                   className="mt-2"
                 />
               </div>
@@ -1339,7 +1355,7 @@ Don't miss out! ✨`;
                   type="email"
                   value={businessEmail}
                   onChange={(e) => setBusinessEmail(e.target.value)}
-                  placeholder="info@lushdrycleaners.ug"
+                  placeholder="info@example.com"
                   className="mt-2"
                 />
               </div>
@@ -1546,7 +1562,7 @@ Don't miss out! ✨`;
                                 ...prev,
                                 [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '' }), email: e.target.value },
                               }))}
-                              placeholder="branch@lushdrycleaners.ug"
+                              placeholder="branch@example.com"
                               className="mt-1 h-8 text-sm"
                             />
                           </div>
@@ -1691,7 +1707,7 @@ Don't miss out! ✨`;
                     type="email"
                     value={newBranch.email}
                     onChange={(e) => setNewBranch({ ...newBranch, email: e.target.value })}
-                    placeholder="ntinda@lushdrycleaners.ug"
+                    placeholder="ntinda@example.com"
                     className="mt-2"
                   />
                 </div>
@@ -2263,7 +2279,7 @@ Don't miss out! ✨`;
                     <Input
                       id="business-email"
                       type="email"
-                      placeholder="info@lushlaundry.com"
+                      placeholder="info@example.com"
                       value={businessEmail}
                       onChange={(e) => setBusinessEmail(e.target.value)}
                       className="mt-2"
@@ -2281,7 +2297,7 @@ Don't miss out! ✨`;
                 <Label htmlFor="invoice-footer">Invoice Footer Text</Label>
                 <Textarea
                   id="invoice-footer"
-                  placeholder="Thank you for choosing Lush Laundry Services!"
+                  placeholder="Thank you for choosing Soth Dry Cleaners!"
                   value={invoiceFooter}
                   onChange={(e) => setInvoiceFooter(e.target.value)}
                   disabled={!uraComplianceEnabled}
@@ -2445,13 +2461,32 @@ Don't miss out! ✨`;
               </div>
 
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase">Percentage Discount Limit</h3>
-                <p className="text-xs text-muted-foreground">Maximum percentage discount permitted on an order. This is separate from fixed-amount bargains and price-ups.</p>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase">Whole-Order Discount Limit</h3>
+                <p className="text-xs text-muted-foreground">Maximum percentage discount applied to the entire order subtotal. This setting does not change per-item discounts.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
                     { id: 'da-discount', label: 'Desktop Agent', value: desktopAgentDiscountPercent, set: setDesktopAgentDiscountPercent, placeholder: '10' },
                     { id: 'mgr-discount', label: 'Manager', value: managerDiscountPercent, set: setManagerDiscountPercent, placeholder: '20' },
-                    { id: 'adm-discount', label: 'Administrator', value: adminDiscountPercent, set: setAdminDiscountPercent, placeholder: '100' },
+                    { id: 'adm-discount', label: 'Administrator', value: adminDiscountPercent, set: setAdminDiscountPercent, placeholder: '50' },
+                  ].map(({ id, label, value, set, placeholder }) => (
+                    <div key={id}>
+                      <Label htmlFor={id}>{label} (%)</Label>
+                      <Input id={id} type="number" min="0" max="100" step="1" value={value}
+                        onChange={(e) => set(e.target.value)} onFocus={(e) => e.target.select()}
+                        placeholder={placeholder} className="mt-2" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Discount Limit (%)</h3>
+                <p className="text-xs text-muted-foreground">Maximum percentage staff may deduct from one selected item. Set an administrator to 100% to allow a fully complimentary item. This does not raise the whole-order percentage limit.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { id: 'da-item-discount', label: 'Desktop Agent', value: desktopAgentItemDiscountPercent, set: setDesktopAgentItemDiscountPercent, placeholder: '10' },
+                    { id: 'mgr-item-discount', label: 'Manager', value: managerItemDiscountPercent, set: setManagerItemDiscountPercent, placeholder: '20' },
+                    { id: 'adm-item-discount', label: 'Administrator', value: adminItemDiscountPercent, set: setAdminItemDiscountPercent, placeholder: '100' },
                   ].map(({ id, label, value, set, placeholder }) => (
                     <div key={id}>
                       <Label htmlFor={id}>{label} (%)</Label>
@@ -2467,9 +2502,8 @@ Don't miss out! ✨`;
             <Alert className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
               <Shield className="h-4 w-4 text-blue-600" />
               <AlertDescription className="text-blue-800 dark:text-blue-200">
-                <strong>How it works:</strong> When creating an order, item bargains must stay within the per-item ceiling
-                and all bargains combined must stay within the overall ceiling. You receive a notification whenever a
-                bargain is used.
+                <strong>How it works:</strong> The per-item percentage cap controls quick discounts such as 50% or 100% on one garment.
+                Whole-order percentage limits remain independent. Fixed UGX bargains still follow the per-item and total bargain ceilings.
               </AlertDescription>
             </Alert>
 

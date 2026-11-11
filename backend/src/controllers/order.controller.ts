@@ -368,6 +368,26 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     const catalogueUnits = items.reduce((sum: number, entry: any) => sum + Math.max(1, Math.round(Number(entry.quantity) || 1)), 0);
     let catalogueAllocated = 0;
 
+    const discountSetting = await client.query(
+      `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
+    );
+    let configuredDiscountLimits: Record<string, unknown> = {};
+    if (discountSetting.rows[0]?.setting_value) {
+      try {
+        configuredDiscountLimits = JSON.parse(discountSetting.rows[0].setting_value);
+      } catch {
+        configuredDiscountLimits = {};
+      }
+    }
+    const roleKey = req.user!.role === 'DESKTOP_AGENT' ? 'desktop_agent'
+      : req.user!.role === 'MANAGER' ? 'manager' : 'admin';
+    const defaultItemDiscountPercent = req.user!.role === 'DESKTOP_AGENT' ? 10
+      : req.user!.role === 'MANAGER' ? 20 : 100;
+    const configuredItemDiscountPercent = Number(configuredDiscountLimits[roleKey + '_item']);
+    const maxItemDiscountPercent = Number.isFinite(configuredItemDiscountPercent) && configuredItemDiscountPercent >= 0 && configuredItemDiscountPercent <= 100
+      ? configuredItemDiscountPercent
+      : defaultItemDiscountPercent;
+
     for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
       const item = items[itemIndex];
       const requestedPricingMode = item.pricing_mode === 'catalogue_kg'
@@ -470,9 +490,17 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const normalizedQuantity = isPerKg ? Math.round(quantity * 10) / 10 : quantity;
       const grossItemTotal = Math.round(normalizedQuantity * actualUnitPrice);
 
-      // Per-item bargain: capped at the line total and at the role's discount ceiling,
-      // so a line-by-line discount cannot exceed what the staff member may give overall.
-      const requestedItemDiscount = Math.round(Number(item.discount_amount) || 0);
+      // Per-item discounts use a distinct role cap; whole-order discounts are validated separately below.
+      const requestedItemDiscountPercent = item.item_discount_percent === undefined || item.item_discount_percent === null
+        ? null
+        : Number(item.item_discount_percent);
+      if (requestedItemDiscountPercent !== null &&
+          (!Number.isFinite(requestedItemDiscountPercent) || requestedItemDiscountPercent < 0 || requestedItemDiscountPercent > maxItemDiscountPercent)) {
+        throw new Error(`Per-item discount on ${priceItem.name} exceeds your role limit of ${maxItemDiscountPercent}%`);
+      }
+      const requestedItemDiscount = requestedItemDiscountPercent === null
+        ? Math.round(Number(item.discount_amount) || 0)
+        : Math.round(grossItemTotal * requestedItemDiscountPercent / 100);
       if (requestedItemDiscount < 0) {
         throw new Error(`Item discount cannot be negative for ${priceItem.name}`);
       }
@@ -480,7 +508,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const roleDiscountCeiling = Math.round(
         grossItemTotal * (getMaxDiscountForRole(req.user!.role) / 100)
       );
-      if (requestedItemDiscount > roleDiscountCeiling) {
+      if (requestedItemDiscountPercent === null && requestedItemDiscount > roleDiscountCeiling) {
         throw new Error(
           `Discount on ${priceItem.name} exceeds your limit (max ${getMaxDiscountForRole(req.user!.role)}% = ${roleDiscountCeiling})`
         );
@@ -513,6 +541,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         discount_amount: itemDiscount,
         surcharge_amount: requestedItemSurcharge,
         total_price: itemTotal,
+        item_discount_percent: requestedItemDiscountPercent,
         notes: itemNotes
       });
     }
@@ -520,19 +549,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     // 2. Validate and calculate discount (role-based limit)
     const discountPercentageValue = parseFloat(discount_percentage.toString()) || 0;
     let maxDiscountForRole = getMaxDiscountForRole(req.user!.role);
-    const discountSetting = await client.query(
-      `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
-    );
-    if (discountSetting.rows[0]?.setting_value) {
-      try {
-        const configured = JSON.parse(discountSetting.rows[0].setting_value);
-        const key = req.user!.role === 'DESKTOP_AGENT' ? 'desktop_agent'
-          : req.user!.role === 'MANAGER' ? 'manager' : 'admin';
-        const value = Number(configured[key]);
-        if (Number.isFinite(value) && value >= 0 && value <= 100) maxDiscountForRole = value;
-      } catch {
-        // Keep the role default when the setting is malformed.
-      }
+    const configuredOrderDiscount = Number(configuredDiscountLimits[roleKey]);
+    if (Number.isFinite(configuredOrderDiscount) && configuredOrderDiscount >= 0 && configuredOrderDiscount <= 100) {
+      maxDiscountForRole = configuredOrderDiscount;
     }
     
     if (discountPercentageValue < 0 || discountPercentageValue > maxDiscountForRole) {
@@ -568,6 +587,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     // Enforce per-item ceiling for every line that has a bargain
     if (maxPerItem > 0) {
       for (const item of validatedItems) {
+        if (item.item_discount_percent !== null && item.item_discount_percent !== undefined) continue;
         const itemDiscount = Number(item.discount_amount || 0);
         if (itemDiscount > maxPerItem) {
           throw new Error(

@@ -8,7 +8,7 @@ DROP POLICY IF EXISTS tenants_runtime_read_own_policy ON public.tenants;
 CREATE POLICY tenants_runtime_read_own_policy
   ON public.tenants
   FOR SELECT
-  TO lush_app
+  TO soth_app
   USING (
     id = NULLIF(current_setting('app.current_tenant_id', TRUE), '')::INTEGER
   );

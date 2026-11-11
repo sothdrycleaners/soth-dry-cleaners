@@ -16,7 +16,7 @@
 /*
 INSERT INTO users (email, password, full_name, phone, role, status, auth_provider)
 VALUES (
-    'admin@lushlaundry.com',                    -- Your email
+    'admin@example.com',                    -- Your email
     '$2a$10$YourBcryptHashedPasswordHere',      -- Generate with bcryptjs
     'Your Full Name',                            -- Your name
     '0700000000',                                -- Your phone
@@ -117,7 +117,7 @@ ON CONFLICT (item_name) DO NOTHING;
 -- Example: Create cashier account
 INSERT INTO users (email, password, full_name, phone, role, status, auth_provider, must_change_password)
 VALUES (
-    'cashier@lushlaundry.com',
+    'cashier@example.com',
     '$2a$10$YourBcryptHashedPasswordHere',      -- Temporary password, they'll change it
     'Cashier Name',
     '0700000001',

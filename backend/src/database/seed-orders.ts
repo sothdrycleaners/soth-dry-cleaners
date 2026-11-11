@@ -28,7 +28,7 @@ async function seedOrders() {
     console.log(`Found ${priceItems.length} price items`);
 
     // Get admin user (we'll use them as the staff who created orders)
-    const userResult = await query("SELECT id FROM users WHERE email = 'admin@lushlaundry.com' LIMIT 1");
+    const userResult = await query("SELECT id FROM users WHERE email = 'admin@example.com' LIMIT 1");
     if (userResult.rows.length === 0) {
       console.error('Admin user not found. Please create an admin user first.');
       return;

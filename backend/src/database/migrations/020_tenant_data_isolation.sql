@@ -1,7 +1,7 @@
 -- Tenant data isolation hardening.
 -- Apply manually with the database migration/admin role after reviewing the
 -- data counts. Existing business records are assigned to the default tenant
--- (Lush, tenant 1); no business records are copied to tenant 2.
+-- (Soth Dry Cleaners, tenant 1); no business records are copied to tenant 2.
 
 BEGIN;
 

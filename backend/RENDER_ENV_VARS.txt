@@ -1,57 +1,33 @@
-# Render.com Environment Variables for Lush Laundry Backend
-# Copy these to Render dashboard when setting up the service
+# Render API environment template for Soth Dry Cleaners
+# Use values from the Soth Dry Cleaners Production Supabase project only.
+# Do not connect the Soth app to the Lush project.
 
-# ============================================
-# DATABASE (CRITICAL - From Supabase)
-# ============================================
-DATABASE_URL=postgresql://postgres.xrkptygpwjdizvhkgvpo:YOUR_SUPABASE_PASSWORD@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
-DB_HOST=aws-1-ap-south-1.pooler.supabase.com
-DB_PORT=6543
-DB_NAME=postgres
-DB_USER=postgres.xrkptygpwjdizvhkgvpo
-DB_PASSWORD=YOUR_SUPABASE_PASSWORD
+# Runtime database role (created by reviewed Soth migrations)
+APP_DATABASE_URL=postgresql://soth_app.<SOTH_PROJECT_REF>:<SOTH_APP_PASSWORD>@<SOTH_POOLER_HOST>:6543/postgres
+DEPLOYMENT_TENANT_ID=1
+RUN_STARTUP_MIGRATIONS=false
 
-# ============================================
-# APPLICATION
-# ============================================
+# Application
 NODE_ENV=production
 PORT=5000
-JWT_SECRET=your_production_jwt_secret_minimum_32_characters_long_random_string
+JWT_SECRET=<GENERATE_A_LONG_RANDOM_SECRET>
+FRONTEND_URL=https://<YOUR_VERCEL_DOMAIN>
 
-# ============================================
-# EMAIL (CRITICAL - Gmail App Password)
-# ============================================
-EMAIL_USER=husseinibram555@gmail.com
-EMAIL_PASSWORD=YOUR_16_CHAR_GMAIL_APP_PASSWORD
-BACKUP_EMAIL_USER=husseinibram555@gmail.com
-BACKUP_EMAIL_PASSWORD=YOUR_16_CHAR_GMAIL_APP_PASSWORD
+# Set this to the developer email allowlisted for the hidden system-admin account.
+SYSTEM_ADMIN_EMAILS=<DEVELOPER_EMAIL>
+AUTHORIZED_ADMIN_EMAILS=<BUSINESS_ADMIN_EMAILS>
 
-# ============================================
-# FRONTEND URL (Update after Netlify deployment)
-# ============================================
-FRONTEND_URL=https://laundrosys.netlify.app
-SYSTEM_ADMIN_EMAILS=husseinibram555@gmail.com
-
-# ============================================
-# SUPABASE STORAGE (PROFILE PICTURES)
-# ============================================
-SUPABASE_URL=https://xrkptygpwjdizvhkgvpo.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
+# Supabase Storage (server-side only)
+SUPABASE_URL=https://<SOTH_PROJECT_REF>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<SOTH_SERVICE_ROLE_KEY>
 SUPABASE_STORAGE_BUCKET=profile-pictures
 
-# ============================================
-# OPTIONAL (Can enable later)
-# ============================================
-SMS_ENABLED=false
-# AFRICASTALKING_API_KEY=your_key_here
-# AFRICASTALKING_USERNAME=your_username_here
-# TWILIO_ACCOUNT_SID=your_sid_here
-# TWILIO_AUTH_TOKEN=your_token_here
+# Optional mail configuration
+EMAIL_USER=<SOTH_EMAIL_ADDRESS>
+EMAIL_PASSWORD=<EMAIL_APP_PASSWORD>
+BACKUP_EMAIL_USER=<SOTH_EMAIL_ADDRESS>
+BACKUP_EMAIL_PASSWORD=<EMAIL_APP_PASSWORD>
 
-# ============================================
-# NOTES
-# ============================================
-# 1. Replace YOUR_SUPABASE_PASSWORD with actual Supabase password
-# 2. Replace YOUR_16_CHAR_GMAIL_APP_PASSWORD with Gmail App Password (16 chars, no spaces)
-# 3. Generate JWT_SECRET: Use a random 32+ character string
-# 4. Update FRONTEND_URL after deploying frontend to Netlify
+# Keep the database-owner URL out of the long-running Render API service.
+# Use it only in a one-off migration/release process after reviewing the SQL.
+# MIGRATION_DATABASE_URL=postgresql://postgres.<SOTH_PROJECT_REF>:<SOTH_DB_PASSWORD>@<SOTH_SESSION_POOLER_HOST>:5432/postgres

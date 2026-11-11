@@ -2,7 +2,7 @@ import { body, validationResult } from 'express-validator';
 import { Request, Response, NextFunction } from 'express';
 
 // Password strength validation regex
-const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$/;
 
 // Email validation
 export const validateEmail = body('email')
@@ -20,7 +20,7 @@ export const validatePassword = body('password')
   .withMessage('Password must be at least 8 characters long')
   .matches(PASSWORD_REGEX)
   .withMessage(
-    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)'
+    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&#)'
   );
 
 // Full name validation

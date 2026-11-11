@@ -29,7 +29,7 @@ const seed = async () => {
       INSERT INTO users (email, password, full_name, phone, role, status)
       VALUES ($1, $2, $3, $4, 'ADMIN', 'ACTIVE')
       RETURNING id
-    `, [process.env.SEED_ADMIN_EMAIL || 'admin@lushlaundry.com', hashedPassword, 'System Administrator', process.env.SEED_ADMIN_PHONE || '+256700000000']);
+    `, [process.env.SEED_ADMIN_EMAIL || 'admin@example.com', hashedPassword, 'System Administrator', process.env.SEED_ADMIN_PHONE || '+256700000000']);
     
     const adminId = adminResult.rows[0].id;
     console.log('✅ Created admin user');
@@ -46,7 +46,7 @@ const seed = async () => {
         ($1, $2, 'Jane Nambi', '+256 701 111 111', 'USER', 'ACTIVE', $3),
         ($1, $2, 'Moses Okello', '+256 702 222 222', 'USER', 'ACTIVE', $3),
         ($1, $2, 'Sarah Mutesi', '+256 703 333 333', 'USER', 'PENDING', $3)
-    `, ['user@lushlaundry.com', userPassword, adminId]);
+    `, ['user@example.com', userPassword, adminId]);
     console.log('✅ Created sample users');
     
     // 3. Seed Price Items (from your mock data)
@@ -151,7 +151,7 @@ const seed = async () => {
     await client.query('COMMIT');
     console.log('✅ Database seeding completed successfully!');
     console.log('\n📝 Seeded login emails (passwords from your .env SEED_* vars):');
-    console.log(`   Admin: ${process.env.SEED_ADMIN_EMAIL || 'admin@lushlaundry.com'}`);
+    console.log(`   Admin: ${process.env.SEED_ADMIN_EMAIL || 'admin@example.com'}`);
     console.log('   Staff sample users use SEED_USER_PASSWORD from .env');
     console.log('   Never commit real passwords — keep them only in .env\n');
     

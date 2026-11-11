@@ -11,7 +11,7 @@ type PriceSeedItem = {
 };
 
 /**
- * Complete Price List Data from Lush Laundry actual pricing
+ * Complete Price List Data from Soth Dry Cleaners actual pricing
  * All prices in UGX
  */
 

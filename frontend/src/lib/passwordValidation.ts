@@ -17,15 +17,15 @@ export interface PasswordValidationResult {
 export const validatePassword = (password: string): PasswordValidationResult => {
   const errors: string[] = [];
   // Keep this in sync with backend/src/middleware/validation.middleware.ts.
-  // The backend accepts letters, digits, and @$!%*?& only (after trimming).
+  // The backend accepts letters, digits, and @$!%*?&# only (after trimming).
   const normalizedPassword = password.trim();
   
   if (normalizedPassword.length < PASSWORD_REQUIREMENTS.minLength) {
     errors.push(`Password must be at least ${PASSWORD_REQUIREMENTS.minLength} characters long`);
   }
 
-  if (normalizedPassword && !/^[A-Za-z\d@$!%*?&]+$/.test(normalizedPassword)) {
-    errors.push('Use only letters, numbers, and these symbols: @$!%*?&');
+  if (normalizedPassword && !/^[A-Za-z\d@$!%*?&#]+$/.test(normalizedPassword)) {
+    errors.push('Use only letters, numbers, and these symbols: @$!%*?&#');
   }
   
   if (PASSWORD_REQUIREMENTS.requireUppercase && !/[A-Z]/.test(normalizedPassword)) {
@@ -40,8 +40,8 @@ export const validatePassword = (password: string): PasswordValidationResult => 
     errors.push('Password must contain at least one number');
   }
   
-  if (PASSWORD_REQUIREMENTS.requireSpecialChar && !/[@$!%*?&]/.test(normalizedPassword)) {
-    errors.push('Password must contain at least one special character (@$!%*?&)');
+  if (PASSWORD_REQUIREMENTS.requireSpecialChar && !/[@$!%*?&#]/.test(normalizedPassword)) {
+    errors.push('Password must contain at least one special character (@$!%*?&#)');
   }
   
   // Calculate strength

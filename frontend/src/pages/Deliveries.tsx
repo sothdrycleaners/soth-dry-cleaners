@@ -611,16 +611,13 @@ export default function Deliveries() {
               <p>No deliveries scheduled for this date</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table className="min-w-[1000px]">
+            <div className="w-full">
+              <Table className="w-full table-fixed">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="whitespace-nowrap">Order</TableHead>
                     <TableHead className="whitespace-nowrap">Customer</TableHead>
                     <TableHead className="whitespace-nowrap">Type</TableHead>
-                    <TableHead className="whitespace-nowrap">Zone/Address</TableHead>
-                    <TableHead className="whitespace-nowrap">Time Slot</TableHead>
-                    <TableHead className="whitespace-nowrap">Driver</TableHead>
                     <TableHead className="whitespace-nowrap">Cost</TableHead>
                     <TableHead className="whitespace-nowrap">Status</TableHead>
                     <TableHead className="whitespace-nowrap">Actions</TableHead>
@@ -662,39 +659,6 @@ export default function Deliveries() {
                         }>
                           {delivery.delivery_type === 'PAID' ? '💰 PAID' : '🎁 FREE'}
                         </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="flex items-center gap-1 font-medium text-sm">
-                            <MapPin className="h-3 w-3" />
-                            {delivery.zone_name || 'N/A'}
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                            {delivery.delivery_address || 'No address'}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1 text-sm">
-                          <Clock className="h-3 w-3" />
-                          {delivery.scheduled_time_slot || 'Not set'}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {delivery.delivery_person_name || delivery.driver_name ? (
-                          <div>
-                            <div className="font-medium text-sm">
-                              {delivery.delivery_person_name || delivery.driver_name}
-                            </div>
-                            {(delivery.vehicle_info || delivery.vehicle_type) && (
-                              <div className="text-xs text-muted-foreground">
-                                {delivery.vehicle_info || `${delivery.vehicle_type} - ${delivery.vehicle_number}`}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">Not assigned</span>
-                        )}
                       </TableCell>
                       <TableCell className="font-medium">
                         {delivery.delivery_type === 'PAID' ? (

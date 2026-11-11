@@ -102,7 +102,7 @@ export default {
       boxShadow: {
         'card': '0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05)',
         'elevated': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)',
-        'glow': '0 0 20px hsl(88 50% 45% / 0.3)',
+        'glow': '0 0 20px hsl(32 100% 51% / 0.28)',
       },
     },
   },

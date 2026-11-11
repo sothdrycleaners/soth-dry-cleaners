@@ -11,7 +11,7 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432'),
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || 'lush_laundry',
+  database: process.env.DB_NAME || 'soth_dry_cleaners',
 });
 
 const logQuery = (query: any) => {
@@ -127,8 +127,8 @@ async function checkBackupSystem() {
     const backupDirs = [
       path.join(process.cwd(), 'backups'),
       path.join(process.cwd(), '..', 'backups'),
-      'C:\\backups\\lush_laundry',
-      '/var/backups/lush_laundry'
+      'C:\\backups\\soth_dry_cleaners',
+      '/var/backups/soth_dry_cleaners'
     ];
 
     let backupDirFound = false;

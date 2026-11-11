@@ -27,7 +27,7 @@ const api = axios.create({
 // Request interceptor - Add JWT token to all requests
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('lush_token');
+    const token = localStorage.getItem('soth_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -61,15 +61,15 @@ api.interceptors.response.use(
         return;
       }
 
-      sessionStorage.setItem('lush_post_login_redirect', currentPath);
-      sessionStorage.setItem('lush_post_login_redirect_reason', 'auth-interruption');
+      sessionStorage.setItem('soth_post_login_redirect', currentPath);
+      sessionStorage.setItem('soth_post_login_redirect_reason', 'auth-interruption');
     };
 
     if (status === 401 && hasAuthHeader && !isPublicAuthRoute) {
       // Token expired or invalid
       storePostLoginRedirect();
-      localStorage.removeItem('lush_token');
-      localStorage.removeItem('lush_user');
+      localStorage.removeItem('soth_token');
+      localStorage.removeItem('soth_user');
       window.location.href = '/login';
     }
     return Promise.reject(error);

@@ -13,7 +13,7 @@ async function up() {
     password: '551129',
     host: 'localhost',
     port: 5432,
-    database: 'lush_laundry',
+    database: 'soth_dry_cleaners',
   });
   
   try {
@@ -95,7 +95,7 @@ async function down() {
     password: '551129',
     host: 'localhost',
     port: 5432,
-    database: 'lush_laundry',
+    database: 'soth_dry_cleaners',
   });
   
   try {
