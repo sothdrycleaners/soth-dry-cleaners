@@ -364,7 +364,7 @@ export default function Login() {
               </>}
             </form>
 
-            {/* Create Account Link */}
+            {/* Sign Up Link */}
             {!pinChallenge && <div className="mt-3 sm:mt-4 lg:mt-3 text-center space-y-1.5 sm:space-y-2 lg:space-y-1.5">
               <Separator />
               <p className="text-[10px] sm:text-xs text-muted-foreground pt-1">
@@ -377,7 +377,7 @@ export default function Login() {
                   disabled={loading}
                 >
                   <UserPlus className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
-                  <span className="truncate">Create Account</span>
+                  <span className="truncate">Sign Up</span>
                 </Button>
               </Link>
             </div>}
