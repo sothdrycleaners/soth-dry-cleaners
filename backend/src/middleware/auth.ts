@@ -11,6 +11,8 @@ export interface AuthRequest extends Request {
     email: string;
     full_name: string;
     role: UserRole;
+    operations_access_enabled?: boolean;
+    desktop_workspace_enabled?: boolean;
     tenant_id?: number;
     is_system_admin?: boolean;
     branch_id?: number | null;
@@ -37,6 +39,11 @@ export const authenticate = async (
     
     try {
       const decoded = jwt.verify(token, config.jwt.secret) as any;
+
+      // A password-verified PIN challenge is deliberately not a session token.
+      if (decoded.purpose === 'admin_pin_challenge') {
+        return res.status(401).json({ error: 'Complete administrator PIN verification before accessing the system.' });
+      }
 
       if (
         decoded.tenant_id !== undefined &&
@@ -66,7 +73,7 @@ export const authenticate = async (
 
       try {
         const live = await query(
-          `SELECT id, email, full_name, role, status, tenant_id, branch_id
+          `SELECT id, email, full_name, role, status, tenant_id, branch_id, operations_access_enabled, desktop_workspace_enabled
            FROM users
            WHERE id = $1 AND tenant_id = $2
            LIMIT 1`,
@@ -87,6 +94,8 @@ export const authenticate = async (
           tenant_id: Number(currentUser.tenant_id),
           is_system_admin: isSystemAdminEmail(currentUser.email),
           branch_id: currentUser.branch_id == null ? null : Number(currentUser.branch_id),
+          operations_access_enabled: !!currentUser.operations_access_enabled,
+          desktop_workspace_enabled: !!currentUser.desktop_workspace_enabled,
         };
       } catch (error) {
         // Fail closed rather than authorizing stale claims if account status
@@ -105,13 +114,23 @@ export const authenticate = async (
   }
 };
 
+// Desktop-only business routers mount this after authenticate. Operations accounts receive no desktop data unless an administrator grants it.
+export const requireDesktopWorkspaceAccess = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.user.role === UserRole.OPERATIONS && !req.user.desktop_workspace_enabled) {
+    return res.status(403).json({ error: 'This account is limited to the Operations workspace.' });
+  }
+  return next();
+};
+
 export const authorize = (...roles: UserRole[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
     
-    if (!roles.map((r) => String(r).toUpperCase()).includes(String(req.user.role || '').toUpperCase())) {
+    const grantedDesktopRole = req.user.role === UserRole.OPERATIONS && !!req.user.desktop_workspace_enabled && roles.includes(UserRole.DESKTOP_AGENT);
+    if (!grantedDesktopRole && !roles.map((r) => String(r).toUpperCase()).includes(String(req.user.role || '').toUpperCase())) {
       return res.status(403).json({ 
         error: 'Insufficient permissions',
         required: roles,

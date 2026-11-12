@@ -104,6 +104,8 @@ interface OrderItem {
   discount_amount?: number;
   /** Selected role-authorized percentage discount for this item line */
   item_discount_percent?: number;
+  /** Selects whether the line discount is entered as a percentage or UGX amount. */
+  discount_mode?: 'percent' | 'amount';
   /** Quantity used when the current bargain was entered */
   discount_basis_quantity?: number;
   /** Bargain amount at the basis quantity */
@@ -209,7 +211,7 @@ export default function NewOrder() {
   const { token, user } = useAuth();
   const { toast } = useToast();
   const defaultMaxDiscountPercent = MAX_DISCOUNT_BY_ROLE[user?.role ?? 'DESKTOP_AGENT'] ?? 10;
-  const defaultMaxItemDiscountPercent = user?.role === 'ADMIN' ? 100 : user?.role === 'MANAGER' ? 20 : 10;
+  const defaultMaxItemDiscountPercent = 100;
   const canChooseBranch = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const isAdminUser = user?.role === 'ADMIN';
   const canPriceUp = !!user; // All authenticated staff can apply price-up (surcharge)
@@ -263,11 +265,13 @@ export default function NewOrder() {
   const [standardKgRate, setStandardKgRate] = useState(10000);
   const [transactionDiscount, setTransactionDiscount] = useState(0);
   const [bargainAmount, setBargainAmount] = useState(0);
+  const [orderDiscountMode, setOrderDiscountMode] = useState<'percent' | 'amount'>('percent');
+  const [itemDiscountMode, setItemDiscountMode] = useState<'percent' | 'amount'>('percent');
   const [orderSurchargeAmount, setOrderSurchargeAmount] = useState(0);
   const [maxBargainAmount, setMaxBargainAmount] = useState(0);
   const [maxItemBargainAmount, setMaxItemBargainAmount] = useState(0);
   const [maxDiscountPercent, setMaxDiscountPercent] = useState(defaultMaxDiscountPercent);
-  const [maxItemDiscountPercent, setMaxItemDiscountPercent] = useState(defaultMaxItemDiscountPercent);
+  const [maxItemDiscountPercent, setMaxItemDiscountPercent] = useState(100);
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'UNPAID' | 'PARTIAL'>('UNPAID');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'ON_ACCOUNT'>('ON_ACCOUNT');
   const [mobileProvider, setMobileProvider] = useState<'MTN' | 'AIRTEL'>('MTN');
@@ -390,6 +394,8 @@ export default function NewOrder() {
       });
       setMaxBargainAmount(Number(response.data.user.max_bargain_amount) || 0);
       setMaxItemBargainAmount(Number(response.data.user.max_item_bargain_amount) || 0);
+      setItemDiscountMode(response.data.user.item_discount_mode === 'amount' ? 'amount' : 'percent');
+      setOrderDiscountMode(response.data.user.order_discount_mode === 'amount' ? 'amount' : 'percent');
       const configuredDiscount = Number(response.data.user.max_discount_percent);
       setMaxDiscountPercent(Number.isFinite(configuredDiscount) && configuredDiscount >= 0
         ? configuredDiscount
@@ -403,7 +409,7 @@ export default function NewOrder() {
       setMaxBargainAmount(0);
       setMaxItemBargainAmount(0);
       setMaxDiscountPercent(defaultMaxDiscountPercent);
-      setMaxItemDiscountPercent(defaultMaxItemDiscountPercent);
+      setMaxItemDiscountPercent(100);
     }
   }, [defaultMaxDiscountPercent, defaultMaxItemDiscountPercent, token]);
 
@@ -545,6 +551,8 @@ export default function NewOrder() {
           unit_price: currentUnitPrice,
           base_unit_price: unitPrice,
           discount_amount: 0,
+          item_discount_percent: itemDiscountMode === 'percent' ? 0 : undefined,
+          discount_mode: itemDiscountMode,
           subtotal: computeLineSubtotal(startQty, currentUnitPrice, 0),
           unit: preferredMode === 'kg' ? 'kg' : 'piece',
           pricing_type: item.pricing_type,
@@ -650,7 +658,7 @@ export default function NewOrder() {
     setOrderItems(globalKgMode ? recalculateCatalogueLines(updated, catalogueKg) : updated);
   };
 
-  /** Per-item bargain, capped at the line's gross value and the role's discount limit */
+  /** Per-item fixed-amount bargain, capped at the line value and configured limit */
   const updateItemDiscount = (index: number, rawValue: string) => {
     const current = orderItems[index];
     if (!current) return;
@@ -675,6 +683,7 @@ export default function NewOrder() {
     const updated = [...orderItems];
     updated[index] = {
       ...updated[index],
+      discount_mode: 'amount',
       discount_amount: discount,
       item_discount_percent: undefined,
       discount_basis_quantity: current.quantity,
@@ -695,8 +704,9 @@ export default function NewOrder() {
     const updated = [...orderItems];
     updated[index] = {
       ...current,
+      discount_mode: 'percent',
       discount_amount: discount,
-      item_discount_percent: percent > 0 ? percent : undefined,
+      item_discount_percent: percent,
       discount_basis_quantity: quantity,
       discount_basis_amount: discount,
       discount_scales_with_quantity: true,
@@ -776,10 +786,12 @@ export default function NewOrder() {
     orderItems.reduce((sum, item) => sum + Number(item.surcharge_amount || 0), 0)
   );
   const totalCatalogueKg = globalKgMode ? catalogueKg : 0;
-  const discountAmount = Math.round((itemsSubtotal * transactionDiscount) / 100);
-  const bargainLimitRemaining = Math.max(0, maxBargainAmount - itemDiscountTotal);
+  const discountAmount = orderDiscountMode === 'percent'
+    ? Math.round((itemsSubtotal * transactionDiscount) / 100)
+    : 0;
+  const bargainLimitRemaining = maxBargainAmount;
   const safeBargain = Math.min(
-    Math.max(0, Math.round(bargainAmount)),
+    orderDiscountMode === 'amount' ? Math.max(0, Math.round(bargainAmount)) : 0,
     Math.max(0, itemsSubtotal - discountAmount),
     bargainLimitRemaining
   );
@@ -962,20 +974,11 @@ export default function NewOrder() {
 
     try {
       const requestedBargain = Math.max(0, Math.round(bargainAmount));
-      if (itemDiscountTotal > maxBargainAmount) {
-        toast({
-          variant: 'destructive',
-          title: 'Bargain limit exceeded',
-          description: `Item bargains total ${formatUGX(itemDiscountTotal)}, which exceeds your limit of ${formatUGX(maxBargainAmount)}.`,
-        });
-        return;
-      }
-
       if (requestedBargain > bargainLimitRemaining) {
         toast({
           variant: 'destructive',
           title: 'Bargain limit exceeded',
-          description: `You have ${formatUGX(bargainLimitRemaining)} left after item bargains.`,
+          description: `The order-level bargain limit is ${formatUGX(bargainLimitRemaining)}. Per-item discounts use their separate limits.`,
         });
         return;
       }
@@ -997,7 +1000,8 @@ export default function NewOrder() {
         subtotal: subtotalAfterDiscount,
         tax_rate: VAT_RATE,
         tax_amount: taxAmount,
-        discount_percentage: transactionDiscount,
+        order_discount_mode: orderDiscountMode,
+        discount_percentage: orderDiscountMode === 'percent' ? transactionDiscount : 0,
         discount_amount: discountAmount,
         bargain_amount: safeBargain,
         surcharge_amount: safeOrderSurcharge,
@@ -1446,7 +1450,7 @@ export default function NewOrder() {
 
                       {/* Adjustment row: toggle between Bargain (deduct) and Price Up (add) */}
                       <div className="flex items-center gap-2">
-                        {canPriceUp ? (
+                        {canPriceUp && (
                           /* Admin/Manager: toggle between bargain and price-up */
                           <div className="flex rounded-md border overflow-hidden shrink-0 h-9 lg:h-7">
                             <button
@@ -1474,12 +1478,14 @@ export default function NewOrder() {
                               ▲ Price Up
                             </button>
                           </div>
-                        ) : (
-                          <Label className="text-[11px] text-muted-foreground whitespace-nowrap">
-                            Item discount (UGX)
-                          </Label>
                         )}
-                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') && maxItemDiscountPercent >= 50 && (
+                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') && (
+                          <span className="text-[10px] text-muted-foreground shrink-0">
+                            {itemDiscountMode === 'percent' ? 'Discount %' : 'Discount UGX'}
+                          </span>
+                        )}
+                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') &&
+                          itemDiscountMode === 'percent' && maxItemDiscountPercent >= 50 && (
                           <div className="flex items-center gap-1 shrink-0">
                             {[50, 100].filter((percent) => percent <= maxItemDiscountPercent).map((percent) => (
                               <Button
@@ -1494,7 +1500,7 @@ export default function NewOrder() {
                                 {percent}%
                               </Button>
                             ))}
-                            {item.item_discount_percent !== undefined && (
+                            {Number(item.item_discount_percent) > 0 && (
                               <Button type="button" size="sm" variant="ghost" className="h-7 px-1.5 text-[10px]"
                                 onClick={() => updateItemDiscountPercent(index, 0)} title="Clear this item discount">Clear</Button>
                             )}
@@ -1505,22 +1511,20 @@ export default function NewOrder() {
                           type="number"
                           inputMode="numeric"
                           min={0}
-                          step={500}
-                          value={
-                            canPriceUp
-                              ? getItemAdjMode(index) === 'bargain'
-                                ? (item.discount_amount
-                                  ? String(item.discount_scales_with_quantity
-                                    ? Math.round(Number(item.discount_amount) / Number(item.quantity))
-                                    : item.discount_amount)
-                                  : '')
-                                : (item.surcharge_per_unit ? String(item.surcharge_per_unit) : '')
-                              : (item.discount_amount ? String(Math.round(Number(item.discount_amount) / Number(item.quantity))) : '')
-                          }
+                          max={(!canPriceUp || getItemAdjMode(index) === 'bargain') && itemDiscountMode === 'percent'
+                            ? maxItemDiscountPercent : undefined}
+                          step={(!canPriceUp || getItemAdjMode(index) === 'bargain') && itemDiscountMode === 'percent' ? 1 : 500}
+                          value={canPriceUp && getItemAdjMode(index) === 'priceup'
+                            ? (item.surcharge_per_unit ? String(item.surcharge_per_unit) : '')
+                            : itemDiscountMode === 'percent'
+                              ? (item.item_discount_percent ?? '')
+                              : (item.discount_amount ? String(Math.round(Number(item.discount_amount) / Number(item.quantity))) : '')}
                           placeholder="0"
                           onChange={(e) => {
                             if (canPriceUp && getItemAdjMode(index) === 'priceup') {
                               updateItemSurcharge(index, e.target.value);
+                            } else if (itemDiscountMode === 'percent') {
+                              updateItemDiscountPercent(index, Number(e.target.value) || 0);
                             } else {
                               updateItemDiscount(index, e.target.value);
                             }
@@ -1533,7 +1537,9 @@ export default function NewOrder() {
                           title={
                             canPriceUp && getItemAdjMode(index) === 'priceup'
                               ? 'Price-up per unit for stains or special treatment; multiplies with quantity.'
-                                : `Bargain per unit; multiplies with quantity. Limit: ${maxItemBargainAmount > 0 ? formatUGX(maxItemBargainAmount) : `${maxDiscountPercent}%`}`
+                              : itemDiscountMode === 'percent'
+                                ? `Percentage discount on this line, up to ${maxItemDiscountPercent}%. It recalculates with quantity.`
+                                : `Fixed bargain per unit; multiplies with quantity. Limit: ${maxItemBargainAmount > 0 ? formatUGX(maxItemBargainAmount) : 'no separate amount limit'}`
                           }
                         />
                         {/* Show the sign badge when amount > 0 */}
@@ -1590,7 +1596,7 @@ export default function NewOrder() {
                 )}
                 {!isAdminUser && (
                   <div className="flex justify-between text-muted-foreground text-xs">
-                    <span>Bargain budget left</span>
+                    <span>Order bargain budget left</span>
                     <span>{formatUGX(bargainLimitRemaining)}</span>
                   </div>
                 )}
@@ -1631,9 +1637,9 @@ export default function NewOrder() {
               {/* Money controls: two across on phones so the "(max …)" hints
                   stay on one or two lines instead of stacking three deep */}
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                <div>
+                {orderDiscountMode === 'percent' && <div>
                   <Label className="text-xs text-muted-foreground">
-                    Discount % <span className="text-muted-foreground/70">(max {maxDiscountPercent}%)</span>
+                    Whole-order discount (%) <span className="text-muted-foreground/70">(admin-set mode; max {maxDiscountPercent}%)</span>
                   </Label>
                   <Input
                     type="number"
@@ -1655,10 +1661,10 @@ export default function NewOrder() {
                     placeholder="0"
                     className="h-10 lg:h-8 text-sm mt-1"
                   />
-                </div>
-                <div>
+                </div>}
+                {orderDiscountMode === 'amount' && <div>
                   <Label className="text-xs text-muted-foreground">
-                    Bargain <span className="text-muted-foreground/70">(max {formatUGX(maxBargainAmount)} total)</span>
+                    Whole-order bargain (UGX) <span className="text-muted-foreground/70">(admin-set mode; max {formatUGX(maxBargainAmount)})</span>
                   </Label>
                   <Input
                     type="number"
@@ -1673,7 +1679,7 @@ export default function NewOrder() {
                         toast({
                           variant: 'destructive',
                           title: 'Bargain Limit',
-                          description: `You have ${formatUGX(bargainLimitRemaining)} left after item bargains.`,
+                          description: `The order-level bargain limit is ${formatUGX(bargainLimitRemaining)}. Per-item discounts use their separate limits.`,
                         });
                       }
                     }}
@@ -1681,7 +1687,7 @@ export default function NewOrder() {
                     className="h-10 lg:h-8 text-sm mt-1"
                     disabled={bargainLimitRemaining === 0}
                   />
-                </div>
+                </div>}
 
                 {canPriceUp && (
                   <div>

@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import * as dashboardController from '../controllers/dashboard.controller';
-import { authenticate } from '../middleware/auth';
+import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 
 const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Basic dashboard stats
 router.get('/stats', dashboardController.getDashboardStats as any);

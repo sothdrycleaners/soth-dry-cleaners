@@ -341,10 +341,22 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
     const discountResult = await query(
       `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
     );
-    let discountLimits = { desktop_agent: 10, manager: 20, admin: 50, desktop_agent_item: 10, manager_item: 20, admin_item: 100 };
+    let discountLimits: Record<string, any> = {
+      desktop_agent: 10, manager: 20, admin: 50,
+      desktop_agent_item: 100, manager_item: 100, admin_item: 100,
+      item_discount_mode: 'percent', order_discount_mode: 'percent',
+    };
     if (discountResult.rows[0]?.setting_value) {
       try {
-        discountLimits = { ...discountLimits, ...JSON.parse(discountResult.rows[0].setting_value) };
+        const storedLimits = JSON.parse(discountResult.rows[0].setting_value);
+        discountLimits = { ...discountLimits, ...storedLimits };
+        if (!['percent', 'amount'].includes(storedLimits.item_discount_mode)) {
+          // Legacy settings predate the mode selector; use the current per-item defaults.
+          discountLimits.item_discount_mode = 'percent';
+          discountLimits.desktop_agent_item = 100;
+          discountLimits.manager_item = 100;
+          discountLimits.admin_item = 100;
+        }
       } catch {
         // Keep role defaults when the stored setting is malformed.
       }
@@ -361,9 +373,11 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
       desktop_agent_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent)) ? Number(discountLimits.desktop_agent) : 10,
       manager_discount_percent: Number.isFinite(Number(discountLimits.manager)) ? Number(discountLimits.manager) : 20,
       admin_discount_percent: Number.isFinite(Number(discountLimits.admin)) ? Number(discountLimits.admin) : 50,
-      desktop_agent_item_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent_item)) ? Number(discountLimits.desktop_agent_item) : 10,
-      manager_item_discount_percent: Number.isFinite(Number(discountLimits.manager_item)) ? Number(discountLimits.manager_item) : 20,
+      desktop_agent_item_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent_item)) ? Number(discountLimits.desktop_agent_item) : 100,
+      manager_item_discount_percent: Number.isFinite(Number(discountLimits.manager_item)) ? Number(discountLimits.manager_item) : 100,
       admin_item_discount_percent: Number.isFinite(Number(discountLimits.admin_item)) ? Number(discountLimits.admin_item) : 100,
+      item_discount_mode: discountLimits.item_discount_mode === 'amount' ? 'amount' : 'percent',
+      order_discount_mode: discountLimits.order_discount_mode === 'amount' ? 'amount' : 'percent',
     });
   } catch (error) {
     console.error('Get bargain limits error:', error);
@@ -378,6 +392,7 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
       desktop_agent_item_limit,  manager_item_limit,  admin_item_limit,
       desktop_agent_discount_percent, manager_discount_percent, admin_discount_percent,
       desktop_agent_item_discount_percent, manager_item_discount_percent, admin_item_discount_percent,
+      item_discount_mode, order_discount_mode,
     } = req.body;
 
     // Accept numbers, numeric strings, and comma-formatted amounts ("5,000").
@@ -406,8 +421,8 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
     const desktopAgentDiscount = parsePercent(desktop_agent_discount_percent, 10);
     const managerDiscount = parsePercent(manager_discount_percent, 20);
     const adminDiscount = parsePercent(admin_discount_percent, 50);
-    const desktopAgentItemDiscount = parsePercent(desktop_agent_item_discount_percent, 10);
-    const managerItemDiscount = parsePercent(manager_item_discount_percent, 20);
+    const desktopAgentItemDiscount = parsePercent(desktop_agent_item_discount_percent, 100);
+    const managerItemDiscount = parsePercent(manager_item_discount_percent, 100);
     const adminItemDiscount = parsePercent(admin_item_discount_percent, 100);
 
     if (desktopAgent === null || manager === null) {
@@ -427,15 +442,8 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
     if (desktopAgent < 0 || manager < 0 || (admin !== null && admin < 0)) {
       return res.status(400).json({ error: 'Bargain limits cannot be negative' });
     }
-    if (desktopAgentItem > desktopAgent) {
-      return res.status(400).json({
-        error: 'Per-item limit cannot exceed the overall limit for desktop agents',
-      });
-    }
-    if (managerItem > manager) {
-      return res.status(400).json({
-        error: 'Per-item limit cannot exceed the overall limit for managers',
-      });
+    if (!['percent', 'amount'].includes(item_discount_mode) || !['percent', 'amount'].includes(order_discount_mode)) {
+      return res.status(400).json({ error: 'Choose either percentage or fixed UGX for each discount mode' });
     }
     if (managerDiscount < desktopAgentDiscount || adminDiscount < managerDiscount) {
       return res.status(400).json({ error: 'Order discount percentages must follow Desktop Agent <= Manager <= Administrator' });
@@ -460,7 +468,16 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
       `INSERT INTO business_settings (setting_key, setting_value, updated_at)
        VALUES ('discount_limits', $1, NOW())
        ON CONFLICT (tenant_id, setting_key) DO UPDATE SET setting_value = $1, updated_at = NOW()`,
-      [JSON.stringify({ desktop_agent: desktopAgentDiscount, manager: managerDiscount, admin: adminDiscount, desktop_agent_item: desktopAgentItemDiscount, manager_item: managerItemDiscount, admin_item: adminItemDiscount })]
+      [JSON.stringify({
+        desktop_agent: desktopAgentDiscount,
+        manager: managerDiscount,
+        admin: adminDiscount,
+        desktop_agent_item: desktopAgentItemDiscount,
+        manager_item: managerItemDiscount,
+        admin_item: adminItemDiscount,
+        item_discount_mode,
+        order_discount_mode,
+      })]
     );
 
     console.log(

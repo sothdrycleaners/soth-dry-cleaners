@@ -2,13 +2,14 @@ import { Response } from 'express';
 import { validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { query } from '../config/database';
 import { config } from '../config';
 import { AuthRequest } from '../middleware/auth';
 import { UserRole, UserStatus } from '../models/User';
 import { userNotificationService } from '../services/user-notification.service';
 import { createNotification } from '../services/notification.service';
-import { isSystemAdminEmail } from '../utils/systemAdmin';
+import { getSystemAdminEmails, isSystemAdminEmail } from '../utils/systemAdmin';
 import { getEffectiveBargainLimit } from '../utils/roleLimits';
 import { createProfilePictureAccessUrl, uploadProfileImageToSupabase } from '../services/supabaseStorage.service';
 import { 
@@ -31,6 +32,40 @@ const tableHasColumn = async (tableName: string, columnName: string): Promise<bo
   return result.rows[0]?.exists === true;
 };
 
+const createAdminPinHash = (pin: string, userId: number, tenantId: number): string => {
+  const configuredPepper = process.env.ADMIN_PIN_PEPPER?.trim();
+  const usablePepper = configuredPepper && !/^(CHANGE_THIS|YOUR_|GENERATE_)/i.test(configuredPepper)
+    ? configuredPepper
+    : config.jwt.secret;
+  return createHmac('sha256', usablePepper)
+    .update(`${tenantId}:${userId}:${pin}`)
+    .digest('hex');
+};
+
+const isAdminPinHashMatch = (pin: string, storedHash: string, userId: number, tenantId: number): boolean => {
+  if (!/^[a-f0-9]{64}$/i.test(storedHash || '')) return false;
+  const expected = Buffer.from(storedHash, 'hex');
+  const actual = Buffer.from(createAdminPinHash(pin, userId, tenantId), 'hex');
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+};
+
+const getAdminPinChallenge = (req: AuthRequest) => {
+  const token = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.slice(7)
+    : '';
+  if (!token) throw new Error('PIN sign-in session has expired. Sign in again.');
+
+  const decoded = jwt.verify(token, config.jwt.secret) as jwt.JwtPayload;
+  if (
+    decoded.purpose !== 'admin_pin_challenge' ||
+    Number(decoded.tenant_id) !== config.tenancy.deploymentTenantId ||
+    !Number.isSafeInteger(Number(decoded.id))
+  ) {
+    throw new Error('PIN sign-in session is invalid. Sign in again.');
+  }
+  return { userId: Number(decoded.id), tenantId: Number(decoded.tenant_id) };
+};
+
 export const register = async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -50,7 +85,7 @@ export const register = async (req: AuthRequest, res: Response) => {
     
     // Self-service registrations always require systems-admin approval.
     const status = UserStatus.PENDING;
-    const allowedRoles = [UserRole.ADMIN, UserRole.MANAGER, UserRole.DESKTOP_AGENT];
+    const allowedRoles = [UserRole.ADMIN, UserRole.MANAGER, UserRole.DESKTOP_AGENT, UserRole.OPERATIONS];
     const userRole = allowedRoles.includes(role) ? role : UserRole.DESKTOP_AGENT;
 
     // New users inherit the current role limits configured in Settings.
@@ -207,8 +242,9 @@ export const login = async (req: AuthRequest, res: Response) => {
     const result = await query(
       `SELECT id, email, password, full_name, phone, role, status, profile_picture, profile_picture_url,
               tenant_id,
-              branch_id, failed_login_attempts, account_locked_until, last_failed_login,
-              must_change_password, COALESCE(temporary_password_login_attempts, 0) AS temporary_password_login_attempts
+              branch_id, operations_access_enabled, desktop_workspace_enabled, failed_login_attempts, account_locked_until, last_failed_login,
+              must_change_password, COALESCE(temporary_password_login_attempts, 0) AS temporary_password_login_attempts,
+              admin_pin_hash, admin_pin_enabled
        FROM users WHERE LOWER(email) = LOWER($1) AND tenant_id = $2`,
       [email, config.tenancy.deploymentTenantId]
     );
@@ -335,6 +371,24 @@ export const login = async (req: AuthRequest, res: Response) => {
         attempts_remaining: attemptsLeft,
       });
     }
+
+    if (user.role === UserRole.ADMIN && user.admin_pin_enabled) {
+      // Fail closed if an enabled PIN has no usable hash; never downgrade to password-only login.
+      if (!user.admin_pin_hash) {
+        return res.status(503).json({ error: 'Administrator PIN security needs attention. Contact the systems administrator.' });
+      }
+      const challengeToken = jwt.sign(
+        { id: user.id, role: user.role, tenant_id: user.tenant_id, purpose: 'admin_pin_challenge' },
+        config.jwt.secret,
+        { expiresIn: '5m' }
+      );
+      await query(
+        `UPDATE users SET failed_login_attempts = 0, account_locked_until = NULL, last_failed_login = NULL
+         WHERE id = $1 AND tenant_id = $2`,
+        [user.id, user.tenant_id]
+      );
+      return res.json({ requires_pin: true, challenge_token: challengeToken, expires_in: 300 });
+    }
     
     // Generate JWT token
     const token = jwt.sign(
@@ -362,7 +416,8 @@ export const login = async (req: AuthRequest, res: Response) => {
        WHERE id = $1 AND tenant_id = $2
        RETURNING id, email, full_name, phone, role, status, profile_picture, profile_picture_url,
                  tenant_id, branch_id, created_at, updated_at, last_login, max_bargain_amount,
-                 max_item_bargain_amount, must_change_password, temporary_password_login_attempts`,
+                 max_item_bargain_amount, must_change_password, temporary_password_login_attempts,
+                 admin_pin_enabled, operations_access_enabled, desktop_workspace_enabled`,
       [user.id, user.tenant_id]
     );
     
@@ -407,13 +462,223 @@ export const login = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const verifyAdminPin = async (req: AuthRequest, res: Response) => {
+  try {
+    const pin = typeof req.body.pin === 'string' ? req.body.pin : '';
+    if (!/^\d{4}$/.test(pin)) {
+      return res.status(400).json({ error: 'Enter all four PIN digits.' });
+    }
+
+    let challenge: { userId: number; tenantId: number };
+    try {
+      challenge = getAdminPinChallenge(req);
+    } catch (error) {
+      return res.status(401).json({ error: error instanceof Error ? error.message : 'PIN sign-in session is invalid.' });
+    }
+
+    const found = await query(
+      `SELECT id, email, full_name, role, status, password, tenant_id, branch_id,
+              admin_pin_hash, admin_pin_enabled, admin_pin_failed_attempts, admin_pin_locked_until
+       FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [challenge.userId, challenge.tenantId]
+    );
+    const user = found.rows[0];
+    if (!user || user.role !== UserRole.ADMIN || user.status !== UserStatus.ACTIVE || !user.admin_pin_enabled || !user.admin_pin_hash) {
+      return res.status(401).json({ error: 'Administrator PIN sign-in is no longer available. Sign in again.' });
+    }
+
+    if (user.admin_pin_locked_until && new Date(user.admin_pin_locked_until) > new Date()) {
+      const remainingMinutes = Math.ceil((new Date(user.admin_pin_locked_until).getTime() - Date.now()) / 60000);
+      await logFailedLogin(user.email, req.ip || 'unknown', req.headers['user-agent'] || 'unknown', 'Administrator PIN attempt while locked');
+      return res.status(429).json({ error: `PIN entry is temporarily locked. Try again in ${remainingMinutes} minute${remainingMinutes === 1 ? '' : 's'}.` });
+    }
+
+    const tenantId = Number(user.tenant_id);
+    if (!isAdminPinHashMatch(pin, user.admin_pin_hash, Number(user.id), tenantId)) {
+      const failures = await query(
+        `UPDATE users
+         SET admin_pin_failed_attempts = admin_pin_failed_attempts + 1,
+             admin_pin_locked_until = CASE
+               WHEN admin_pin_failed_attempts + 1 >= 5 THEN NOW() + INTERVAL '15 minutes'
+               ELSE admin_pin_locked_until
+             END
+         WHERE id = $1 AND tenant_id = $2
+         RETURNING admin_pin_failed_attempts, admin_pin_locked_until`,
+        [user.id, tenantId]
+      );
+      const attempts = Number(failures.rows[0]?.admin_pin_failed_attempts || 0);
+      const locked = Boolean(failures.rows[0]?.admin_pin_locked_until && new Date(failures.rows[0].admin_pin_locked_until) > new Date());
+      await logFailedLogin(user.email, req.ip || 'unknown', req.headers['user-agent'] || 'unknown', `Incorrect administrator PIN (attempt ${attempts})`);
+      return res.status(locked ? 429 : 401).json({
+        error: locked ? 'Too many incorrect PIN attempts. Try again in 15 minutes.' : 'Incorrect PIN. Please try again.',
+        attempts_remaining: Math.max(0, 5 - attempts),
+      });
+    }
+
+    const updatedResult = await query(
+      `UPDATE users
+       SET admin_pin_failed_attempts = 0, admin_pin_locked_until = NULL,
+           failed_login_attempts = 0, account_locked_until = NULL, last_failed_login = NULL,
+           last_login = NOW(), updated_at = NOW()
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id, email, full_name, phone, role, status, profile_picture, profile_picture_url,
+                 tenant_id, branch_id, created_at, updated_at, last_login, max_bargain_amount,
+                 max_item_bargain_amount, must_change_password, admin_pin_enabled, operations_access_enabled, desktop_workspace_enabled`,
+      [user.id, tenantId]
+    );
+    const signedInUser = updatedResult.rows[0];
+    signedInUser.is_system_admin = isSystemAdminEmail(signedInUser.email);
+    signedInUser.max_bargain_amount = getEffectiveBargainLimit(signedInUser.role, signedInUser.max_bargain_amount);
+    signedInUser.max_item_bargain_amount = Number(signedInUser.max_item_bargain_amount) || 0;
+    signedInUser.profile_picture_url = await createProfilePictureAccessUrl(
+      signedInUser.profile_picture_url || signedInUser.profile_picture,
+      tenantId
+    );
+
+    const token = jwt.sign(
+      {
+        id: signedInUser.id,
+        email: signedInUser.email,
+        full_name: signedInUser.full_name,
+        role: signedInUser.role,
+        tenant_id: tenantId,
+        profile_picture: signedInUser.profile_picture,
+        is_system_admin: signedInUser.is_system_admin,
+        branch_id: signedInUser.branch_id ?? null,
+      },
+      config.jwt.secret,
+      { expiresIn: '7d' }
+    );
+    const clientIP = req.ip || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    await logSuccessfulLogin(signedInUser.id, signedInUser.email, signedInUser.full_name, signedInUser.role, clientIP, userAgent);
+    return res.json({ token, user: signedInUser });
+  } catch (error) {
+    console.error('Administrator PIN verification error:', error);
+    return res.status(500).json({ error: 'Unable to verify the PIN. Please try again.' });
+  }
+};
+
+const createAdminPinResetRequest = async (userId: number, tenantId: number, notes?: string) => {
+  const result = await query(
+    `INSERT INTO admin_pin_reset_requests (tenant_id, user_id, requested_at, status, notes)
+     VALUES ($1, $2, NOW(), 'PENDING', $3)
+     ON CONFLICT (tenant_id, user_id) WHERE status = 'PENDING'
+     DO UPDATE SET requested_at = NOW(), notes = EXCLUDED.notes
+     RETURNING id`,
+    [tenantId, userId, typeof notes === 'string' ? notes.trim().slice(0, 500) || null : null]
+  );
+  const requester = await query(
+    `SELECT full_name, email FROM users WHERE id = $1 AND tenant_id = $2 AND role = $3 AND status = $4`,
+    [userId, tenantId, UserRole.ADMIN, UserStatus.ACTIVE]
+  );
+  const systemAdminEmails = getSystemAdminEmails();
+  if (requester.rows[0] && systemAdminEmails.length > 0) {
+    const admins = await query(
+      `SELECT id FROM users
+       WHERE tenant_id = $1 AND role = $2 AND status = $3 AND LOWER(email) = ANY($4::text[])`,
+      [tenantId, UserRole.ADMIN, UserStatus.ACTIVE, systemAdminEmails]
+    );
+    const adminIds = admins.rows.map((row: any) => Number(row.id));
+    if (adminIds.length > 0) {
+      await createNotification({
+        type: 'SYSTEM_ALERT',
+        title: 'Administrator PIN removal requested',
+        message: `${requester.rows[0].full_name || requester.rows[0].email} requested removal of their sign-in PIN.`,
+        user_ids: adminIds,
+        link: '/password-reset-requests?tab=admin-pin',
+      });
+    }
+  }
+  return result.rows[0]?.id;
+};
+
+export const requestAdminPinReset = async (req: AuthRequest, res: Response) => {
+  try {
+    let userId: number;
+    let tenantId: number;
+    if (req.user) {
+      userId = req.user.id;
+      tenantId = config.tenancy.deploymentTenantId;
+    } else {
+      try {
+        ({ userId, tenantId } = getAdminPinChallenge(req));
+      } catch (error) {
+        return res.status(401).json({ error: error instanceof Error ? error.message : 'PIN sign-in session is invalid.' });
+      }
+    }
+
+    const found = await query(
+      `SELECT role, status, admin_pin_enabled FROM users WHERE id = $1 AND tenant_id = $2`,
+      [userId, tenantId]
+    );
+    const user = found.rows[0];
+    if (!user || user.role !== UserRole.ADMIN || user.status !== UserStatus.ACTIVE || !user.admin_pin_enabled) {
+      return res.status(400).json({ error: 'This account does not have an active PIN to remove.' });
+    }
+
+    await createAdminPinResetRequest(userId, tenantId, req.body?.notes);
+    return res.json({
+      message: 'Your request has been sent to the systems administrator. You can sign in with your password after they approve PIN removal.',
+    });
+  } catch (error) {
+    console.error('Administrator PIN reset request error:', error);
+    return res.status(500).json({ error: 'Unable to send the PIN removal request.' });
+  }
+};
+
+export const updateAdminPinSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    const { enabled, pin, currentPassword } = req.body || {};
+    if (typeof enabled !== 'boolean' || typeof currentPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ error: 'Enter your current password and choose a PIN setting.' });
+    }
+    const found = await query(
+      `SELECT id, password, role, admin_pin_enabled FROM users WHERE id = $1 AND tenant_id = $2`,
+      [req.user!.id, config.tenancy.deploymentTenantId]
+    );
+    const user = found.rows[0];
+    if (!user || user.role !== UserRole.ADMIN) return res.status(403).json({ error: 'Only administrators can use sign-in PINs.' });
+    if (!user.password || !(await bcrypt.compare(currentPassword, user.password))) {
+      return res.status(401).json({ error: 'Current password is incorrect.' });
+    }
+
+    const isSystemAdmin = isSystemAdminEmail(req.user!.email);
+    if (!enabled && user.admin_pin_enabled && !isSystemAdmin) {
+      return res.status(403).json({ error: 'PIN removal requires approval from the systems administrator.' });
+    }
+    if (enabled && !/^\d{4}$/.test(typeof pin === 'string' ? pin : '')) {
+      return res.status(400).json({ error: 'PIN must contain exactly four digits.' });
+    }
+
+    await query(
+      `UPDATE users
+       SET admin_pin_enabled = $1,
+           admin_pin_hash = CASE WHEN $1 THEN $2 ELSE NULL END,
+           admin_pin_failed_attempts = 0,
+           admin_pin_locked_until = NULL,
+           updated_at = NOW()
+       WHERE id = $3 AND tenant_id = $4`,
+      [enabled, enabled ? createAdminPinHash(pin, Number(user.id), config.tenancy.deploymentTenantId) : null, user.id, config.tenancy.deploymentTenantId]
+    );
+    return res.json({
+      message: enabled ? 'Administrator sign-in PIN saved.' : 'Administrator sign-in PIN disabled.',
+      admin_pin_enabled: enabled,
+    });
+  } catch (error) {
+    console.error('Administrator PIN settings error:', error);
+    return res.status(500).json({ error: 'Unable to update the administrator PIN setting.' });
+  }
+};
+
 export const getMe = async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.status, u.profile_picture,
               u.profile_picture_url, u.created_at, u.updated_at, u.last_login, u.auth_provider,
+              u.operations_access_enabled, u.desktop_workspace_enabled,
               u.max_bargain_amount, u.max_item_bargain_amount, u.tenant_id, u.branch_id,
-              u.must_change_password, b.name AS branch_name
+              u.must_change_password, u.admin_pin_enabled, b.name AS branch_name
        FROM users u
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.id = $1 AND u.tenant_id = $2`,
@@ -433,7 +698,9 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       user.tenant_id
     );
     user.max_discount_percent = user.role === 'DESKTOP_AGENT' ? 10 : user.role === 'MANAGER' ? 20 : 50;
-    user.max_item_discount_percent = user.role === 'DESKTOP_AGENT' ? 10 : user.role === 'MANAGER' ? 20 : 100;
+    user.max_item_discount_percent = 100;
+    user.item_discount_mode = 'percent';
+    user.order_discount_mode = 'percent';
     const discountSetting = await query(
       `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
     );
@@ -443,8 +710,12 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         const key = user.role === 'DESKTOP_AGENT' ? 'desktop_agent' : user.role === 'MANAGER' ? 'manager' : 'admin';
         const value = Number(configured[key]);
         if (Number.isFinite(value) && value >= 0 && value <= 100) user.max_discount_percent = value;
-        const itemValue = Number(configured[key + '_item']);
-        if (Number.isFinite(itemValue) && itemValue >= 0 && itemValue <= 100) user.max_item_discount_percent = itemValue;
+        if (configured.item_discount_mode === 'percent') {
+          const itemValue = Number(configured[key + '_item']);
+          if (Number.isFinite(itemValue) && itemValue >= 0 && itemValue <= 100) user.max_item_discount_percent = itemValue;
+        }
+        user.item_discount_mode = configured.item_discount_mode === 'amount' ? 'amount' : 'percent';
+        user.order_discount_mode = configured.order_discount_mode === 'amount' ? 'amount' : 'percent';
       } catch {
         // Retain the role default when the setting is malformed.
       }

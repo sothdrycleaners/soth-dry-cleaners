@@ -294,6 +294,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       items, 
       discount_percentage = 0,
       bargain_amount = 0,
+      order_discount_mode,
       surcharge_amount = 0,
       payment_status = 'UNPAID',
       payment_method = 'CASH',
@@ -381,9 +382,12 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     }
     const roleKey = req.user!.role === 'DESKTOP_AGENT' ? 'desktop_agent'
       : req.user!.role === 'MANAGER' ? 'manager' : 'admin';
-    const defaultItemDiscountPercent = req.user!.role === 'DESKTOP_AGENT' ? 10
-      : req.user!.role === 'MANAGER' ? 20 : 100;
-    const configuredItemDiscountPercent = Number(configuredDiscountLimits[roleKey + '_item']);
+    const defaultItemDiscountPercent = 100;
+    const configuredItemDiscountMode = configuredDiscountLimits.item_discount_mode === 'amount' ? 'amount' : 'percent';
+    const configuredOrderDiscountMode = configuredDiscountLimits.order_discount_mode === 'amount' ? 'amount' : 'percent';
+    const configuredItemDiscountPercent = configuredDiscountLimits.item_discount_mode === 'percent'
+      ? Number(configuredDiscountLimits[roleKey + '_item'])
+      : 100;
     const maxItemDiscountPercent = Number.isFinite(configuredItemDiscountPercent) && configuredItemDiscountPercent >= 0 && configuredItemDiscountPercent <= 100
       ? configuredItemDiscountPercent
       : defaultItemDiscountPercent;
@@ -494,13 +498,26 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const requestedItemDiscountPercent = item.item_discount_percent === undefined || item.item_discount_percent === null
         ? null
         : Number(item.item_discount_percent);
+      const itemDiscountMode = item.discount_mode ?? configuredItemDiscountMode;
+      if (itemDiscountMode !== 'percent' && itemDiscountMode !== 'amount') {
+        throw new Error(`Choose either a percentage or UGX discount for ${priceItem.name}`);
+      }
+      if (itemDiscountMode !== configuredItemDiscountMode) {
+        throw new Error(`The administrator has set per-item discounts to ${configuredItemDiscountMode === 'percent' ? 'percentage' : 'fixed UGX'} mode`);
+      }
+      if (itemDiscountMode === 'percent' && requestedItemDiscountPercent === null) {
+        throw new Error(`Enter a percentage discount for ${priceItem.name}`);
+      }
+      if (itemDiscountMode === 'amount' && requestedItemDiscountPercent !== null) {
+        throw new Error(`Choose only one discount mode for ${priceItem.name}`);
+      }
       if (requestedItemDiscountPercent !== null &&
           (!Number.isFinite(requestedItemDiscountPercent) || requestedItemDiscountPercent < 0 || requestedItemDiscountPercent > maxItemDiscountPercent)) {
         throw new Error(`Per-item discount on ${priceItem.name} exceeds your role limit of ${maxItemDiscountPercent}%`);
       }
-      const requestedItemDiscount = requestedItemDiscountPercent === null
+      const requestedItemDiscount = itemDiscountMode === 'amount'
         ? Math.round(Number(item.discount_amount) || 0)
-        : Math.round(grossItemTotal * requestedItemDiscountPercent / 100);
+        : Math.round(grossItemTotal * (requestedItemDiscountPercent ?? 0) / 100);
       if (requestedItemDiscount < 0) {
         throw new Error(`Item discount cannot be negative for ${priceItem.name}`);
       }
@@ -547,7 +564,22 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     }
     
     // 2. Validate and calculate discount (role-based limit)
-    const discountPercentageValue = parseFloat(discount_percentage.toString()) || 0;
+    const requestedDiscountPercentage = parseFloat(discount_percentage.toString()) || 0;
+    const requestedBargainAmount = parseInt(bargain_amount.toString()) || 0;
+    const orderDiscountMode = order_discount_mode ?? configuredOrderDiscountMode;
+    if (orderDiscountMode !== 'percent' && orderDiscountMode !== 'amount') {
+      throw new Error('Choose either a percentage or fixed UGX discount for the whole order');
+    }
+    if (orderDiscountMode !== configuredOrderDiscountMode) {
+      throw new Error(`The administrator has set whole-order discounts to ${configuredOrderDiscountMode === 'percent' ? 'percentage' : 'fixed UGX'} mode`);
+    }
+    if (orderDiscountMode === 'percent' && requestedBargainAmount > 0) {
+      throw new Error('Clear the fixed UGX bargain or switch the whole-order mode to Fixed UGX');
+    }
+    if (orderDiscountMode === 'amount' && requestedDiscountPercentage > 0) {
+      throw new Error('Clear the percentage discount or switch the whole-order mode to Percentage');
+    }
+    const discountPercentageValue = orderDiscountMode === 'percent' ? requestedDiscountPercentage : 0;
     let maxDiscountForRole = getMaxDiscountForRole(req.user!.role);
     const configuredOrderDiscount = Number(configuredDiscountLimits[roleKey]);
     if (Number.isFinite(configuredOrderDiscount) && configuredOrderDiscount >= 0 && configuredOrderDiscount <= 100) {
@@ -563,7 +595,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     const discount_amount = Math.round(calculatedSubtotal * (discountPercentageValue / 100));
     
     // 2.5. Validate bargain amount (role-based limit)
-    const bargainAmountValue = parseInt(bargain_amount.toString()) || 0;
+    const bargainAmountValue = orderDiscountMode === 'amount' ? requestedBargainAmount : 0;
     
     if (bargainAmountValue < 0) {
       throw new Error('Bargain amount cannot be negative');
@@ -597,14 +629,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Enforce overall ceiling (item bargains + order-level bargain combined)
-    const totalBargainRequested = totalItemDiscount + bargainAmountValue;
-    if (totalBargainRequested > maxOverall) {
-      throw new Error(
-        `Total bargain (item discounts + order bargain) of UGX ${totalBargainRequested.toLocaleString()} exceeds your overall limit of UGX ${maxOverall.toLocaleString()}`
-      );
-    }
-
+    // The UGX bargain ceiling applies to the whole-order fixed bargain only.
+    // Per-item discounts have their own percentage and fixed-amount limits.
     if (bargainAmountValue > maxOverall) {
       throw new Error(
         `Order bargain of UGX ${bargainAmountValue.toLocaleString()} exceeds your overall limit of UGX ${maxOverall.toLocaleString()}`

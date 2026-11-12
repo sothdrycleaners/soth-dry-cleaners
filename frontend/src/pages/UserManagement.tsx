@@ -52,6 +52,7 @@ import {
 } from '@/components/ui/pagination';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { 
   Users, UserCheck, UserX, UserPlus, Shield, Activity, 
@@ -68,7 +69,9 @@ interface User {
   email: string;
   full_name: string;
   phone: string;
-  role: 'ADMIN' | 'MANAGER' | 'DESKTOP_AGENT';
+  role: 'ADMIN' | 'MANAGER' | 'DESKTOP_AGENT' | 'OPERATIONS';
+  operations_access_enabled?: boolean;
+  desktop_workspace_enabled?: boolean;
   status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED';
   created_at: string;
   updated_at: string;
@@ -165,6 +168,7 @@ const UserManagement = () => {
   const [userActionPending, setUserActionPending] = useState<string | null>(null);
   const userActionPendingRef = useRef(false);
   const [updatingBranchUserId, setUpdatingBranchUserId] = useState<number | null>(null);
+  const [updatingWorkspaceAccess, setUpdatingWorkspaceAccess] = useState(false);
   const updatingBranchRef = useRef<number | null>(null);
   const [showRoleDialog, setShowRoleDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -607,6 +611,28 @@ const UserManagement = () => {
     }
   };
 
+  const handleWorkspaceAccessChange = async (access: 'operations' | 'desktop', enabled: boolean) => {
+    if (!selectedUser || !isAdmin || updatingWorkspaceAccess) return;
+    setUpdatingWorkspaceAccess(true);
+    try {
+      const response = await axios.patch(
+        `${API_BASE_URL}/admin/users/${selectedUser.id}/workspace-access`,
+        { access, enabled },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const updated = response.data.user as Pick<User, 'operations_access_enabled' | 'desktop_workspace_enabled'>;
+      setSelectedUser((current) => current ? { ...current, ...updated } : current);
+      setUsers((current) => current.map((person) => person.id === selectedUser.id ? { ...person, ...updated } : person));
+      setPendingUsers((current) => current.map((person) => person.id === selectedUser.id ? { ...person, ...updated } : person));
+      toast({ title: 'Workspace access updated', description: enabled ? 'The additional workspace is now available after the user signs in again.' : 'Access to the additional workspace has been removed.' });
+    } catch (error) {
+      const message = (error as AxiosError<{ error?: string }>).response?.data?.error || 'Could not update workspace access.';
+      toast({ title: 'Update failed', description: message, variant: 'destructive' });
+    } finally {
+      setUpdatingWorkspaceAccess(false);
+    }
+  };
+
   const handleUpdateRole = async () => {
     if (!selectedUser || !newRole || userActionPendingRef.current) return;
     userActionPendingRef.current = true;
@@ -623,7 +649,10 @@ const UserManagement = () => {
         title: 'Success',
         description: 'User role updated successfully',
       });
-      setUsers((current) => current.map((user) => user.id === selectedUser.id ? { ...user, role: newRole as User['role'] } : user));
+      const changedUser = { ...selectedUser, role: newRole as User['role'] };
+      setSelectedUser(changedUser);
+      setUsers((current) => current.map((user) => user.id === selectedUser.id ? { ...user, role: changedUser.role } : user));
+      setPendingUsers((current) => current.map((user) => user.id === selectedUser.id ? { ...user, role: changedUser.role } : user));
       
       setShowRoleDialog(false);
       setSelectedUser(null);
@@ -690,7 +719,8 @@ const UserManagement = () => {
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case 'ADMIN': return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
-      case 'CASHIER': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+      case 'OPERATIONS': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      case 'DESKTOP_AGENT': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200';
     }
   };
@@ -883,7 +913,9 @@ const UserManagement = () => {
                       <SelectContent>
                         <SelectItem value="all">All Roles</SelectItem>
                         <SelectItem value="ADMIN">Administrator</SelectItem>
-                        <SelectItem value="CASHIER">Desktop Agent</SelectItem>
+                        <SelectItem value="MANAGER">Manager</SelectItem>
+                        <SelectItem value="DESKTOP_AGENT">Desktop Agent</SelectItem>
+                        <SelectItem value="OPERATIONS">Operations</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1345,6 +1377,45 @@ const UserManagement = () => {
                     </div>
                   </div>
                 </div>
+
+                {isAdmin && (
+                  <div className="rounded-lg border p-4">
+                    <h4 className="font-semibold">Primary role</h4>
+                    <p className="mt-1 text-sm text-muted-foreground">Change this person?s main job on the same account. Account history and sign-in details stay intact.</p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Select value={newRole || selectedUser.role} onValueChange={setNewRole}>
+                        <SelectTrigger className="sm:max-w-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ADMIN">Administrator</SelectItem>
+                          <SelectItem value="MANAGER">Manager</SelectItem>
+                          <SelectItem value="DESKTOP_AGENT">Desktop Agent</SelectItem>
+                          <SelectItem value="OPERATIONS">Operations</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" disabled={!newRole || newRole === selectedUser.role || userActionPending === 'role'} onClick={() => void handleUpdateRole()}>Save role</Button>
+                    </div>
+                  </div>
+                )}
+
+                {isAdmin && (selectedUser.role === 'OPERATIONS' || selectedUser.role === 'DESKTOP_AGENT') && (
+                  <div className="rounded-lg border p-4">
+                    <h4 className="font-semibold">Workspace access</h4>
+                    <p className="mt-1 text-sm text-muted-foreground">Grant a second workspace to this account. Their primary role and existing records stay on the same account.</p>
+                    <div className="mt-4 flex items-center justify-between gap-4 rounded-md bg-muted/50 p-3">
+                      <div>
+                        <p className="font-medium">{selectedUser.role === 'OPERATIONS' ? 'Desktop workspace' : 'Operations workspace'}</p>
+                        <p className="text-xs text-muted-foreground">{selectedUser.role === 'OPERATIONS' ? 'Lets this Operations account enter the desktop system.' : 'Lets this Desktop Agent switch into Operations.'}</p>
+                      </div>
+                      <Switch
+                        checked={selectedUser.role === 'OPERATIONS' ? !!selectedUser.desktop_workspace_enabled : !!selectedUser.operations_access_enabled}
+                        onCheckedChange={(enabled) => void handleWorkspaceAccessChange(selectedUser.role === 'OPERATIONS' ? 'desktop' : 'operations', enabled)}
+                        disabled={updatingWorkspaceAccess || selectedUser.status !== 'ACTIVE'}
+                        aria-label={selectedUser.role === 'OPERATIONS' ? 'Grant desktop workspace access' : 'Grant Operations workspace access'}
+                      />
+                    </div>
+                    {selectedUser.status !== 'ACTIVE' && <p className="mt-2 text-xs text-amber-700">Approve and activate this account before granting workspace access.</p>}
+                  </div>
+                )}
 
                 {/* Approval Information */}
                 {(selectedUser.approved_by_name || selectedUser.rejection_reason) && (

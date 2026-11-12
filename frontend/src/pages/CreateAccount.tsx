@@ -280,6 +280,7 @@ export default function CreateAccount() {
                     <SelectItem value="ADMIN">Administrator</SelectItem>
                     <SelectItem value="MANAGER">Manager</SelectItem>
                     <SelectItem value="DESKTOP_AGENT">Desktop Agent</SelectItem>
+                    <SelectItem value="OPERATIONS">Operations</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">

@@ -2,6 +2,7 @@ export enum UserRole {
   ADMIN = 'ADMIN',
   MANAGER = 'MANAGER',
   DESKTOP_AGENT = 'DESKTOP_AGENT',
+  OPERATIONS = 'OPERATIONS',
 }
 
 export enum UserStatus {
@@ -18,6 +19,8 @@ export interface User {
   full_name: string;
   phone: string;
   role: UserRole;
+  operations_access_enabled?: boolean;
+  desktop_workspace_enabled?: boolean;
   status: UserStatus;
   created_by?: number;
   created_at: Date;

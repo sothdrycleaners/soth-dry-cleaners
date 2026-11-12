@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
-import { authenticate, requireAdmin, requireAdminOrManager } from '../middleware/auth';
+import { authenticate, requireAdmin, requireAdminOrManager , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import {
   recordExpense,
   getAllExpenses,
@@ -16,6 +16,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 /**
  * @route   POST /api/expenses

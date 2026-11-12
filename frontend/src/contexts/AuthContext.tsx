@@ -10,9 +10,12 @@ interface User {
   email: string;
   full_name: string;
   phone?: string;
-  role: 'ADMIN' | 'MANAGER' | 'DESKTOP_AGENT';
+  role: 'ADMIN' | 'MANAGER' | 'DESKTOP_AGENT' | 'OPERATIONS';
+  operations_access_enabled?: boolean;
+  desktop_workspace_enabled?: boolean;
   status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   is_system_admin?: boolean;
+  admin_pin_enabled?: boolean;
   profile_picture?: string;
   profile_picture_url?: string;
   session_timeout_minutes?: number;  // User's session timeout preference (5-30 minutes)
@@ -33,6 +36,8 @@ interface AuthContextType {
   isSystemAdmin: boolean;
   isManager: boolean;
   isCashier: boolean;
+  canAccessOperations: boolean;
+  canAccessDesktopWorkspace: boolean;
   canAccessUserManagement: boolean;
   canAccessSettings: boolean;
   canAccessReports: boolean;
@@ -42,7 +47,9 @@ interface AuthContextType {
   canEditPrices: boolean;
   canCancelOrders: boolean;
   canApproveExpenses: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<{ requiresPin: boolean; challengeToken?: string }>;
+  completeAdminPinLogin: (challengeToken: string, pin: string) => Promise<void>;
+  requestAdminPinReset: (challengeToken?: string) => Promise<string>;
   logout: (preserveRedirect?: boolean) => void;
   updateUser: (updatedUser: User) => void;
   refreshUser: () => void;  // Reload user from localStorage
@@ -50,8 +57,10 @@ interface AuthContextType {
 }
 
 interface LoginResponse {
-  token: string;
-  user: User;
+  token?: string;
+  user?: User;
+  requires_pin?: boolean;
+  challenge_token?: string;
   error?: string;
   locked?: boolean;
   locked_until?: string;
@@ -368,6 +377,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [isSessionStale, logout]);
 
+  const establishSession = (data: LoginResponse) => {
+    if (!data.token || !data.user) throw new Error('The server returned an incomplete sign-in response.');
+    setToken(data.token);
+    setUser(data.user);
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    markActivity(true);
+    resetInactivityTimer();
+    if (data.user.must_change_password) {
+      navigate('/profile#change-password');
+      return;
+    }
+    const redirectPath = consumePostLoginRedirect();
+    navigate(redirectPath || (data.user.role === 'OPERATIONS' ? '/operations-demo' : '/dashboard'));
+  };
+
   const login = async (email: string, password: string) => {
     try {
       const loginUrl = `${API_BASE_URL}/auth/login`;
@@ -380,7 +405,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ email, password }),
       });
 
-      const data: LoginResponse = await response.json();
+      const data: LoginResponse = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         const loginErr: LoginError = new Error(data.error || 'Login failed');
@@ -394,27 +419,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         throw loginErr;
       }
-
-      // Save to state and localStorage
-      setToken(data.token);
-      setUser(data.user);
-      localStorage.setItem(TOKEN_KEY, data.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-      markActivity(true);
-      
-      // Start inactivity timer
-      resetInactivityTimer();
-
-      // Check if password change is required
-      if (data.user.must_change_password) {
-        navigate('/profile#change-password');
-        return;
+      if (data.requires_pin && data.challenge_token) {
+        return { requiresPin: true, challengeToken: data.challenge_token };
       }
-
-      const redirectPath = consumePostLoginRedirect();
-
-      // Return the user to the page they were on before auth interruption.
-      navigate(redirectPath || '/dashboard');
+      establishSession(data);
+      return { requiresPin: false };
     } catch (error: unknown) {
       console.error('❌ Login error:', error);
       const message = error instanceof Error ? error.message : 'Login failed';
@@ -429,6 +438,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       throw rethrow;
     }
+  };
+
+  const completeAdminPinLogin = async (challengeToken: string, pin: string) => {
+    const response = await fetch(`${API_BASE_URL}/auth/verify-admin-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${challengeToken}` },
+      body: JSON.stringify({ pin }),
+    });
+    const data: LoginResponse = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'PIN verification failed.');
+    establishSession(data);
+  };
+
+  const requestAdminPinReset = async (challengeToken?: string) => {
+    const requestToken = challengeToken || token;
+    if (!requestToken) throw new Error('Your sign-in session has expired. Sign in again.');
+    const url = challengeToken
+      ? `${API_BASE_URL}/auth/request-admin-pin-reset`
+      : `${API_BASE_URL}/auth/admin-pin/request-disable`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${requestToken}` },
+      body: JSON.stringify({}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Unable to send the PIN request.');
+    return data.message || 'Your PIN removal request has been sent to the systems administrator.';
   };
 
   // Modal handlers
@@ -462,11 +498,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAdmin: user?.role === 'ADMIN',
     isSystemAdmin: user?.role === 'ADMIN' && !!user?.is_system_admin,
     isManager: user?.role === 'MANAGER',
-    isCashier: user?.role === 'DESKTOP_AGENT',
+    isCashier: user?.role === 'DESKTOP_AGENT' || (user?.role === 'OPERATIONS' && !!user?.desktop_workspace_enabled),
+    canAccessOperations: user?.role === 'ADMIN' || user?.role === 'MANAGER' || user?.role === 'OPERATIONS' || (user?.role === 'DESKTOP_AGENT' && !!user?.operations_access_enabled),
+    canAccessDesktopWorkspace: user?.role !== 'OPERATIONS' || !!user?.desktop_workspace_enabled,
     canAccessUserManagement: user?.role === 'ADMIN' || user?.role === 'MANAGER',
     // Every settings write is ADMIN-only on the server; keep the UI honest
     canAccessSettings: user?.role === 'ADMIN',
-    canAccessReports: user?.role === 'ADMIN' || user?.role === 'MANAGER',
+    canAccessReports: user?.role === 'ADMIN' || user?.role === 'MANAGER' || user?.role === 'DESKTOP_AGENT' || (user?.role === 'OPERATIONS' && !!user?.desktop_workspace_enabled),
     canAccessInventory: !!user,
     canEditCustomers: user?.role === 'ADMIN',
     canDeleteCustomers: user?.role === 'ADMIN',
@@ -474,6 +512,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     canCancelOrders: user?.role === 'ADMIN' || user?.role === 'MANAGER',
     canApproveExpenses: user?.role === 'ADMIN' || user?.role === 'MANAGER',
     login,
+    completeAdminPinLogin,
+    requestAdminPinReset,
     logout,
     updateUser,
     refreshUser,

@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import * as branchController from '../controllers/branch.controller';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { UserRole } from '../models/User';
 
 const router = Router();
 
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Any authenticated user needs to read branches (order forms, receipts, filters)
 router.get('/', branchController.getBranches as any);

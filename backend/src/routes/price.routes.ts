@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as priceController from '../controllers/price.controller';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { UserRole } from '../models/User';
 import { priceValidation } from '../middleware/validation';
 
@@ -8,6 +8,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Category management (must be before /:id to avoid conflicts)
 router.get('/categories', priceController.getCategories as any);

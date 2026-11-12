@@ -1,6 +1,6 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireDesktopWorkspaceAccess } from '../middleware/auth';
 import { requireAdmin } from '../middleware/permissions';
 import {
   createBackup,
@@ -15,6 +15,7 @@ import {
 const router = express.Router();
 
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 router.use(requireAdmin as any); // All backup routes require admin
 
 // Get backup statistics

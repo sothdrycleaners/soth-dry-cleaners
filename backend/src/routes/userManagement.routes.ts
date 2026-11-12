@@ -1,6 +1,7 @@
 import express from 'express';
-import { authenticate, requireAdmin, requireAdminOrManager } from '../middleware/auth';
+import { authenticate, requireAdmin, requireAdminOrManager, requireSystemAdmin } from '../middleware/auth';
 import * as userManagementController from '../controllers/userManagement.controller';
+import * as adminPinRequestsController from '../controllers/adminPinRequests.controller';
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ router.put('/users/:userId/reject', userManagementController.rejectUser as any);
 router.put('/users/:userId/suspend', userManagementController.suspendUser as any);
 router.put('/users/:userId/activate', userManagementController.activateUser as any);
 router.put('/users/:userId/role', requireAdmin as any, userManagementController.updateUserRole as any);
+router.patch('/users/:userId/workspace-access', requireAdmin as any, userManagementController.updateWorkspaceAccess as any);
 router.put('/users/:userId/branch', userManagementController.updateUserBranch as any);
 router.put('/users/:userId/details', requireAdmin as any, userManagementController.updateUserDetails as any);
 router.delete('/users/:userId', requireAdmin as any, userManagementController.deleteUser as any);
@@ -31,5 +33,9 @@ router.get('/password-reset-requests/all', userManagementController.getAllPasswo
 router.post('/users/:userId/reset-password', userManagementController.resetUserPassword as any);
 router.delete('/password-reset-requests/:requestId', userManagementController.deletePasswordResetRequest as any);
 router.patch('/password-reset-requests/:requestId/reactivate', userManagementController.reactivatePasswordResetRequest as any);
+
+// Administrator PIN removal is visible and actionable only to the configured systems administrator.
+router.get('/admin-pin-reset-requests', requireSystemAdmin as any, adminPinRequestsController.listAdminPinResetRequests as any);
+router.put('/admin-pin-reset-requests/:requestId', requireSystemAdmin as any, adminPinRequestsController.resolveAdminPinResetRequest as any);
 
 export default router;

@@ -28,6 +28,16 @@ interface PasswordResetRequest {
   resolved_by_name?: string;
 }
 
+interface AdminPinResetRequest {
+  id: number;
+  user_id: number;
+  email: string;
+  full_name: string;
+  role: string;
+  requested_at: string;
+  notes?: string | null;
+}
+
 const PasswordResetRequests = () => {
   const { token, user } = useAuth();
   const { toast } = useToast();
@@ -41,6 +51,8 @@ const PasswordResetRequests = () => {
   const [generatedPassword, setGeneratedPassword] = useState('');
   const [approving, setApproving] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [adminPinRequests, setAdminPinRequests] = useState<AdminPinResetRequest[]>([]);
+  const [adminPinRequestsLoading, setAdminPinRequestsLoading] = useState(false);
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -69,6 +81,49 @@ const PasswordResetRequests = () => {
   useEffect(() => {
     fetchRequests();
   }, [fetchRequests]);
+
+  const fetchAdminPinRequests = useCallback(async () => {
+    if (!user?.is_system_admin || !token) return;
+    try {
+      setAdminPinRequestsLoading(true);
+      const response = await axios.get(
+        `${API_BASE_URL}/user-management/admin-pin-reset-requests`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setAdminPinRequests(response.data.requests || []);
+    } catch (error) {
+      console.error('Error fetching admin PIN requests:', error);
+      toast({ title: 'Error', description: 'Failed to load administrator PIN requests.', variant: 'destructive' });
+    } finally {
+      setAdminPinRequestsLoading(false);
+    }
+  }, [user?.is_system_admin, token, toast]);
+
+  useEffect(() => {
+    fetchAdminPinRequests();
+  }, [fetchAdminPinRequests]);
+
+  const resolveAdminPinRequest = async (request: AdminPinResetRequest, decision: 'APPROVE' | 'DENY') => {
+    const actionKey = `pin-${decision}-${request.id}`;
+    try {
+      setBusyAction(actionKey);
+      const response = await axios.put(
+        `${API_BASE_URL}/user-management/admin-pin-reset-requests/${request.id}`,
+        { decision },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setAdminPinRequests((current) => current.filter((item) => item.id !== request.id));
+      toast({
+        title: decision === 'APPROVE' ? 'PIN disabled' : 'Request denied',
+        description: response.data.message,
+      });
+    } catch (error) {
+      const message = (error as { response?: { data?: { error?: string } } }).response?.data?.error || 'Unable to resolve this PIN request.';
+      toast({ title: 'Request not updated', description: message, variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   const generateRandomPassword = () => {
     // Avoid visually ambiguous characters and punctuation that is easy to
@@ -241,6 +296,61 @@ const PasswordResetRequests = () => {
             Denied requests can be reactivated from the "Denied" tab if needed. Users can always submit new requests.
           </AlertDescription>
         </Alert>
+
+        {user?.is_system_admin && (
+          <Card id="admin-pin-requests" className="scroll-mt-6 border-orange-300 dark:border-orange-900">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Administrator PIN removal requests
+                {adminPinRequests.length > 0 && <Badge variant="destructive">{adminPinRequests.length}</Badge>}
+              </CardTitle>
+              <CardDescription>
+                Only you can review these requests. Approval disables PIN sign-in for that administrator; it does not change their password.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {adminPinRequestsLoading ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">Loading PIN requests...</div>
+              ) : adminPinRequests.length === 0 ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">No pending administrator PIN requests.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Administrator</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Requested</TableHead>
+                      <TableHead>Note</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {adminPinRequests.map((request) => (
+                      <TableRow key={request.id}>
+                        <TableCell className="font-medium">{request.full_name}</TableCell>
+                        <TableCell className="break-all">{request.email}</TableCell>
+                        <TableCell>{new Date(request.requested_at).toLocaleString()}</TableCell>
+                        <TableCell className="max-w-xs whitespace-normal">{request.notes || '—'}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="sm" onClick={() => resolveAdminPinRequest(request, 'APPROVE')} disabled={busyAction !== null}>
+                              {busyAction === `pin-APPROVE-${request.id}` ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1 h-4 w-4" />}
+                              Disable PIN
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => resolveAdminPinRequest(request, 'DENY')} disabled={busyAction !== null}>
+                              {busyAction === `pin-DENY-${request.id}` ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <XCircle className="mr-1 h-4 w-4" />}
+                              Deny
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Tabs defaultValue="pending" className="w-full">
           <TabsList className="grid w-full grid-cols-3 h-auto">

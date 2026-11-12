@@ -1,11 +1,12 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { requireAdmin } from '../middleware/permissions';
 import { getDamageClaims, createDamageClaim, updateDamageClaim } from '../controllers/damage.controller';
 
 const router = express.Router();
 
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Anyone can log a claim; resolution requires admin
 router.get('/', getDamageClaims as any);

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as customerController from '../controllers/customer.controller';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireDesktopWorkspaceAccess } from '../middleware/auth';
 import { customerValidation } from '../middleware/validation';
 import { canEditCustomers, canDeleteCustomers } from '../middleware/permissions';
 
@@ -8,6 +8,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 router.get('/', customerController.getAllCustomers as any);
 router.get('/stats/overview', customerController.getCustomerStats as any);

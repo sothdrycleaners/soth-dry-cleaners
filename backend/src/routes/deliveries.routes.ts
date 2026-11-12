@@ -1,6 +1,6 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { authenticate } from '../middleware/auth';
+import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import {
   getAllDeliveries,
   getDeliveryByOrderId,
@@ -19,6 +19,7 @@ import {
 const router = express.Router();
 
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Get all deliveries
 router.get('/', getAllDeliveries as any);

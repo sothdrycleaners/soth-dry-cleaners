@@ -5,8 +5,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import { REGEXP_ONLY_DIGITS } from 'input-otp';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { User, Camera, Lock, Shield, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Camera, Lock, Shield, AlertCircle, CheckCircle2, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -15,13 +18,22 @@ import { resolveProfilePictureUrl } from '@/lib/profilePicture';
 import axios from 'axios';
 
 const Profile = () => {
-  const { user, token, updateUser, refreshUser } = useAuth();
+  const { user, token, updateUser, refreshUser, requestAdminPinReset } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [adminPin, setAdminPin] = useState('');
+  const [adminPinConfirm, setAdminPinConfirm] = useState('');
+  const [adminPinPassword, setAdminPinPassword] = useState('');
+  const [savingAdminPin, setSavingAdminPin] = useState(false);
+  const [requestingPinRemoval, setRequestingPinRemoval] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showAdminPinPassword, setShowAdminPinPassword] = useState(false);
 
   // Profile form state
   const [profileData, setProfileData] = useState({
@@ -281,6 +293,50 @@ const Profile = () => {
     }
   };
 
+  const handleAdminPinToggle = async (enabled: boolean) => {
+    if (!user || user.role !== 'ADMIN') return;
+    if (!user?.is_system_admin && !enabled && user?.admin_pin_enabled) return;
+    if (!adminPinPassword) {
+      toast({ title: 'Current password required', description: 'Confirm your account password before changing PIN security.', variant: 'destructive' });
+      return;
+    }
+    if (enabled && (!/^\d{4}$/.test(adminPin) || adminPin !== adminPinConfirm)) {
+      toast({ title: 'Check the PIN', description: adminPin !== adminPinConfirm ? 'The PIN entries do not match.' : 'Enter and confirm exactly four digits.', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      setSavingAdminPin(true);
+      const response = await axios.put(
+        `${API_BASE_URL}/auth/admin-pin/settings`,
+        { enabled, pin: enabled ? adminPin : undefined, currentPassword: adminPinPassword },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      updateUser({ ...user, admin_pin_enabled: enabled });
+      setAdminPin('');
+      setAdminPinConfirm('');
+      setAdminPinPassword('');
+      toast({ title: enabled ? 'PIN enabled' : 'PIN disabled', description: response.data.message });
+    } catch (error) {
+      const message = (error as { response?: { data?: { error?: string } } }).response?.data?.error || 'Unable to update PIN security.';
+      toast({ title: 'PIN setting not changed', description: message, variant: 'destructive' });
+    } finally {
+      setSavingAdminPin(false);
+    }
+  };
+
+  const handleAdminPinRemovalRequest = async () => {
+    try {
+      setRequestingPinRemoval(true);
+      const message = await requestAdminPinReset();
+      toast({ title: 'Request sent to systems administrator', description: message });
+    } catch (error) {
+      toast({ title: 'Request not sent', description: error instanceof Error ? error.message : 'Unable to send request.', variant: 'destructive' });
+    } finally {
+      setRequestingPinRemoval(false);
+    }
+  };
+
   const getInitials = (name: string) => {
     return name
       .split(' ')
@@ -521,35 +577,53 @@ const Profile = () => {
               {!user.must_change_password && (
                 <div className="space-y-2">
                   <Label htmlFor="current-password">Current Password</Label>
-                  <Input
-                    id="current-password"
-                    type="password"
-                    value={passwordData.currentPassword}
-                    onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                    placeholder="Enter current password"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="current-password"
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      className="pr-10"
+                      value={passwordData.currentPassword}
+                      onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                      placeholder="Enter current password"
+                    />
+                    <button type="button" onClick={() => setShowCurrentPassword((visible) => !visible)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}>
+                      {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
               )}
               <div className="space-y-2">
                 <Label htmlFor="new-password">New Password</Label>
-                <Input
-                  id="new-password"
-                  type="password"
-                  value={passwordData.newPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                  placeholder="Enter new password (min 6 characters)"
-                  autoFocus={user.must_change_password}
-                />
+                <div className="relative">
+                  <Input
+                    id="new-password"
+                    type={showNewPassword ? 'text' : 'password'}
+                    className="pr-10"
+                    value={passwordData.newPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                    placeholder="Enter new password (min 6 characters)"
+                    autoFocus={user.must_change_password}
+                  />
+                  <button type="button" onClick={() => setShowNewPassword((visible) => !visible)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}>
+                    {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Confirm New Password</Label>
-                <Input
-                  id="confirm-password"
-                  type="password"
-                  value={passwordData.confirmPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                  placeholder="Confirm new password"
-                />
+                <div className="relative">
+                  <Input
+                    id="confirm-password"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    className="pr-10"
+                    value={passwordData.confirmPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                    placeholder="Confirm new password"
+                  />
+                  <button type="button" onClick={() => setShowConfirmPassword((visible) => !visible)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label={showConfirmPassword ? 'Hide confirmed password' : 'Show confirmed password'}>
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             </div>
             <Separator />
@@ -560,6 +634,118 @@ const Profile = () => {
             </div>
           </CardContent>
         </Card>
+
+        {user.role === 'ADMIN' && (
+          <Card id="admin-pin-security" className="scroll-mt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5" />
+                Administrator Sign-in PIN
+              </CardTitle>
+              <CardDescription>
+                Add an optional four-digit PIN as a second sign-in step. Your PIN is stored as a server-side keyed hash.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                <div>
+                  <Label htmlFor="admin-pin-enabled" className="font-medium">Require PIN at sign-in</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {user.admin_pin_enabled
+                      ? user.is_system_admin
+                        ? 'PIN is active. As systems administrator, you can turn it off here.'
+                        : 'PIN is active. Only the systems administrator can approve removal.'
+                      : 'When enabled, password sign-in continues to a separate four-digit PIN screen.'}
+                  </p>
+                </div>
+                <Switch
+                  id="admin-pin-enabled"
+                  checked={Boolean(user.admin_pin_enabled)}
+                  disabled={savingAdminPin || (Boolean(user.admin_pin_enabled) && !user.is_system_admin)}
+                  onCheckedChange={handleAdminPinToggle}
+                  aria-label="Require administrator PIN at sign-in"
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{user.admin_pin_enabled ? 'New four-digit PIN' : 'Four-digit PIN'}</Label>
+                  <div className="flex justify-start">
+                    <InputOTP maxLength={4} value={adminPin} onChange={setAdminPin} pattern={REGEXP_ONLY_DIGITS} inputMode="numeric" autoComplete="off" mask disabled={savingAdminPin}>
+                      <InputOTPGroup>
+                        {[0, 1, 2, 3].map((index) => <InputOTPSlot key={index} index={index} className="h-11 w-11 text-lg" />)}
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Confirm four-digit PIN</Label>
+                  <div className="flex justify-start">
+                    <InputOTP maxLength={4} value={adminPinConfirm} onChange={setAdminPinConfirm} pattern={REGEXP_ONLY_DIGITS} inputMode="numeric" autoComplete="off" mask disabled={savingAdminPin}>
+                      <InputOTPGroup>
+                        {[0, 1, 2, 3].map((index) => <InputOTPSlot key={index} index={index} className="h-11 w-11 text-lg" />)}
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="admin-pin-current-password">Confirm with current password</Label>
+                <div className="relative">
+                  <Input
+                    id="admin-pin-current-password"
+                    type={showAdminPinPassword ? 'text' : 'password'}
+                    className="pr-10"
+                    value={adminPinPassword}
+                    onChange={(event) => setAdminPinPassword(event.target.value)}
+                    placeholder="Enter your current password"
+                    autoComplete="current-password"
+                    disabled={savingAdminPin}
+                  />
+                  <button type="button" onClick={() => setShowAdminPinPassword((visible) => !visible)} disabled={savingAdminPin} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50" aria-label={showAdminPinPassword ? 'Hide current password for PIN settings' : 'Show current password for PIN settings'}>
+                    {showAdminPinPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {user.admin_pin_enabled ? (
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    {user.is_system_admin
+                      ? 'Turning this off lets you sign in with your password alone.'
+                      : 'To stop using the PIN, request removal. Password-only sign-in becomes available after systems-admin approval.'}
+                  </p>
+                  <div className="flex flex-wrap gap-2 sm:justify-end">
+                    <Button onClick={() => handleAdminPinToggle(true)} disabled={savingAdminPin || adminPin.length !== 4 || adminPinConfirm.length !== 4}>
+                      {savingAdminPin ? 'Saving...' : 'Update PIN'}
+                    </Button>
+                    {!user.is_system_admin && (
+                      <Button variant="outline" onClick={handleAdminPinRemovalRequest} disabled={requestingPinRemoval}>
+                        {requestingPinRemoval ? 'Sending...' : 'Request PIN removal'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-end">
+                  <Button onClick={() => handleAdminPinToggle(true)} disabled={savingAdminPin || adminPin.length !== 4 || adminPinConfirm.length !== 4}>
+                    {savingAdminPin ? 'Enabling...' : 'Enable PIN sign-in'}
+                  </Button>
+                </div>
+              )}
+
+              {!user.is_system_admin && user.admin_pin_enabled && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-sm">
+                    Forgot your PIN? Request removal from the PIN screen or here. The systems administrator reviews the request; your password remains unchanged.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </MainLayout>
   );

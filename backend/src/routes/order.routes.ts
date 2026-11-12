@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as orderController from '../controllers/order.controller';
-import { authenticate } from '../middleware/auth';
+import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { orderValidation } from '../middleware/validation';
 import { requireAdmin } from '../middleware/permissions';
 
@@ -8,6 +8,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Stats and bulk operations must come before :id routes
 router.get('/stats', orderController.getOrderStats as any);

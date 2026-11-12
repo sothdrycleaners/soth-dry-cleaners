@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as paymentController from '../controllers/payment.controller';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { requireAdmin } from '../middleware/permissions';
 import { body } from 'express-validator';
 import { UserRole } from '../models/User';
@@ -9,6 +9,7 @@ const router = Router();
 
 // Apply authentication to all routes
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Get all payments (accessible to all authenticated users)
 router.get('/', paymentController.getAllPayments as any);

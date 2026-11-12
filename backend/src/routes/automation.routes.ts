@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize, requireDesktopWorkspaceAccess } from '../middleware/auth';
 import { UserRole } from '../models/User';
 
 const router = Router();
 
 // GET /api/automation-settings - Get all automation settings
-router.get('/', authenticate as any, async (req: Request, res: Response) => {
+router.get('/', authenticate as any,
+  requireDesktopWorkspaceAccess as any, async (req: Request, res: Response) => {
   try {
     const result = await query(`
       SELECT setting_key, setting_value, description, updated_at
@@ -40,6 +41,7 @@ router.get('/', authenticate as any, async (req: Request, res: Response) => {
 router.put(
   '/',
   authenticate as any,
+  requireDesktopWorkspaceAccess as any,
   authorize(UserRole.ADMIN, UserRole.MANAGER) as any,
   async (req: Request, res: Response) => {
   const {

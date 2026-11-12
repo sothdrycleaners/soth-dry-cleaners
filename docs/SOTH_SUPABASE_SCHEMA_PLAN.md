@@ -333,3 +333,13 @@ The user-management controller already excludes allowlisted system-admin account
 After the schema and runtime role exist, configure the Render API with `APP_DATABASE_URL` for the restricted `soth_app` role using the Soth project Transaction Pooler, `DEPLOYMENT_TENANT_ID=1`, `SYSTEM_ADMIN_EMAILS`, and Soth's `SUPABASE_URL`/server-only service key for Storage. Keep the owner/migration URL in a one-off migration process, not the long-running API service. The frontend must call the backend and must not receive database passwords or the service-role key.
 
 The Soth environment templates now use Soth placeholders instead of Lush's project ref. Obtain the runtime Transaction Pooler values from Soth's Connect panel and keep database passwords and service-role keys out of source control.
+
+## Optional administrator sign-in PIN
+
+The backend and frontend now support an optional four-digit PIN for `ADMIN` accounts. PIN setup is not part of account registration. An administrator enables it from Profile after confirming their current password; successful email/password authentication then receives a five-minute, PIN-only challenge token. That challenge cannot access authenticated API routes. A normal session token is issued only after correct PIN verification.
+
+PIN values are not stored in plaintext. The backend stores a tenant- and user-bound HMAC using `ADMIN_PIN_PEPPER` when configured, with the strong backend `JWT_SECRET` as the fallback key. Failed PIN attempts are counted and lock the PIN step after five attempts. The login form presents four masked digit cells and an on-screen number pad, and incorrect entry receives red shake feedback.
+
+An administrator who enabled a PIN may update it after confirming their password, but cannot turn it off personally. They can request removal from Profile or from the PIN screen. Only an address in `SYSTEM_ADMIN_EMAILS` can see and approve or deny these requests. Approval clears the PIN and allows password-only login; the administrator can then optionally enable a new PIN. The systems administrator can also enable or disable their own PIN in Profile. Password reset and PIN reset remain separate processes.
+
+The schema change is in `supabase/migrations/20261111130000_admin_pin_security.sql`. Apply it to the Soth project before starting the updated backend against Supabase. It adds optional PIN fields to `public.users` and a tenant-scoped, RLS-protected `public.admin_pin_reset_requests` table, with access granted to the restricted `soth_app` runtime role. The migration is additive and does not change existing user PIN settings (all default to disabled).

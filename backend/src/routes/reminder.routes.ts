@@ -5,7 +5,7 @@ import {
   updateReminderSettings,
   getOrdersNeedingReminders
 } from '../controllers/reminder.controller';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize, requireDesktopWorkspaceAccess } from '../middleware/auth';
 import { UserRole } from '../models/User';
 
 const router = Router();
@@ -14,6 +14,7 @@ const router = Router();
 router.post(
   '/orders/:id/remind',
   authenticate as any,
+  requireDesktopWorkspaceAccess as any,
   sendOrderReminder as any
 );
 
@@ -21,6 +22,7 @@ router.post(
 router.get(
   '/settings',
   authenticate as any,
+  requireDesktopWorkspaceAccess as any,
   authorize(UserRole.ADMIN, UserRole.MANAGER) as any,
   getReminderSettings as any
 );
@@ -29,6 +31,7 @@ router.get(
 router.put(
   '/settings',
   authenticate as any,
+  requireDesktopWorkspaceAccess as any,
   authorize(UserRole.ADMIN, UserRole.MANAGER) as any,
   updateReminderSettings as any
 );
@@ -37,6 +40,7 @@ router.put(
 router.get(
   '/pending',
   authenticate as any,
+  requireDesktopWorkspaceAccess as any,
   authorize(UserRole.ADMIN) as any,
   getOrdersNeedingReminders as any
 );

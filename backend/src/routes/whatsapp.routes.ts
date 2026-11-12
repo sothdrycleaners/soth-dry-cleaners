@@ -1,13 +1,14 @@
 import express, { Request, Response } from 'express';
 import { query } from '../config/database';
 import { config } from '../config';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, requireDesktopWorkspaceAccess } from '../middleware/auth';
 import { sendWhatsAppMessage } from '../services/whatsapp.service';
 
 const router = express.Router();
 
 // GET - Fetch all messages with stats
-router.get('/messages', authenticate as any, (async (req: AuthRequest, res: Response) => {
+router.get('/messages', authenticate as any,
+  requireDesktopWorkspaceAccess as any, (async (req: AuthRequest, res: Response) => {
   try {
     const period = req.query.period as string || 'all';
     
@@ -55,7 +56,8 @@ router.get('/messages', authenticate as any, (async (req: AuthRequest, res: Resp
 }) as any);
 
 // POST - Send bulk messages
-router.post('/send-bulk', authenticate as any, (async (req: AuthRequest, res: Response) => {
+router.post('/send-bulk', authenticate as any,
+  requireDesktopWorkspaceAccess as any, (async (req: AuthRequest, res: Response) => {
   try {
     const { customer_ids, message, campaign_name } = req.body;
 

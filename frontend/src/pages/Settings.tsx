@@ -161,9 +161,11 @@ export default function Settings() {
   const [desktopAgentDiscountPercent, setDesktopAgentDiscountPercent] = useState('10');
   const [managerDiscountPercent, setManagerDiscountPercent] = useState('20');
   const [adminDiscountPercent, setAdminDiscountPercent] = useState('50');
-  const [desktopAgentItemDiscountPercent, setDesktopAgentItemDiscountPercent] = useState('10');
-  const [managerItemDiscountPercent, setManagerItemDiscountPercent] = useState('20');
+  const [desktopAgentItemDiscountPercent, setDesktopAgentItemDiscountPercent] = useState('100');
+  const [managerItemDiscountPercent, setManagerItemDiscountPercent] = useState('100');
   const [adminItemDiscountPercent, setAdminItemDiscountPercent] = useState('100');
+  const [itemDiscountMode, setItemDiscountMode] = useState<'percent' | 'amount'>('percent');
+  const [orderDiscountMode, setOrderDiscountMode] = useState<'percent' | 'amount'>('percent');
   const [savingBargainLimits, setSavingBargainLimits] = useState(false);
 
   // Payment accounts for on-account / partial WhatsApp receipts
@@ -395,9 +397,11 @@ export default function Settings() {
       setDesktopAgentDiscountPercent(toLimit(response.data.desktop_agent_discount_percent, 10));
       setManagerDiscountPercent(toLimit(response.data.manager_discount_percent, 20));
       setAdminDiscountPercent(toLimit(response.data.admin_discount_percent, 50));
-      setDesktopAgentItemDiscountPercent(toLimit(response.data.desktop_agent_item_discount_percent, 10));
-      setManagerItemDiscountPercent(toLimit(response.data.manager_item_discount_percent, 20));
+      setDesktopAgentItemDiscountPercent(toLimit(response.data.desktop_agent_item_discount_percent, 100));
+      setManagerItemDiscountPercent(toLimit(response.data.manager_item_discount_percent, 100));
       setAdminItemDiscountPercent(toLimit(response.data.admin_item_discount_percent, 100));
+      setItemDiscountMode(response.data.item_discount_mode === 'amount' ? 'amount' : 'percent');
+      setOrderDiscountMode(response.data.order_discount_mode === 'amount' ? 'amount' : 'percent');
     } catch (error) {
       console.error('Failed to load bargain limits:', error);
     }
@@ -721,23 +725,6 @@ export default function Settings() {
       toast({ title: 'Check order discount percentages', description: 'Order discount limits must follow Desktop Agent <= Manager <= Administrator.', variant: 'destructive' });
       return;
     }
-    if (desktopAgentItem > desktopAgent) {
-      toast({ title: 'Check per-item limit', description: 'Desktop agent per-item limit cannot exceed the overall limit.', variant: 'destructive' });
-      return;
-    }
-    if (managerItem > manager) {
-      toast({ title: 'Check per-item limit', description: 'Manager per-item limit cannot exceed the overall limit.', variant: 'destructive' });
-      return;
-    }
-    if (manager < desktopAgent) {
-      toast({ title: 'Check overall limits', description: 'Manager overall limit should not be lower than desktop agent limit.', variant: 'destructive' });
-      return;
-    }
-    if (admin < manager) {
-      toast({ title: 'Check overall limits', description: 'Administrator limit should not be lower than manager limit.', variant: 'destructive' });
-      return;
-    }
-
     try {
       setSavingBargainLimits(true);
 
@@ -756,6 +743,8 @@ export default function Settings() {
           desktop_agent_item_discount_percent: desktopAgentItemDiscount,
           manager_item_discount_percent: managerItemDiscount,
           admin_item_discount_percent: adminItemDiscount,
+          item_discount_mode: itemDiscountMode,
+          order_discount_mode: orderDiscountMode,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -772,10 +761,19 @@ export default function Settings() {
       setDesktopAgentItemDiscountPercent(String(desktopAgentItemDiscount));
       setManagerItemDiscountPercent(String(managerItemDiscount));
       setAdminItemDiscountPercent(String(adminItemDiscount));
+      setItemDiscountMode(itemDiscountMode);
+      setOrderDiscountMode(orderDiscountMode);
+
+      const perItemSummary = itemDiscountMode === 'percent'
+        ? `Per item: desktop agent ${desktopAgentItemDiscount}%, manager ${managerItemDiscount}%, administrator ${adminItemDiscount}%.`
+        : `Per item: desktop agent ${desktopAgentItem.toLocaleString()} UGX, manager ${managerItem.toLocaleString()} UGX, administrator ${adminItem.toLocaleString()} UGX.`;
+      const wholeOrderSummary = orderDiscountMode === 'percent'
+        ? `Whole order: desktop agent ${desktopAgentDiscount}%, manager ${managerDiscount}%, administrator ${adminDiscount}%.`
+        : `Whole order: desktop agent ${desktopAgent.toLocaleString()} UGX, manager ${manager.toLocaleString()} UGX, administrator ${admin.toLocaleString()} UGX.`;
 
       toast({
-        title: 'Bargain limits updated',
-        description: `Desktop agent ${desktopAgent.toLocaleString()} UGX, manager ${manager.toLocaleString()} UGX, administrator ${admin.toLocaleString()} UGX.`,
+        title: 'Bargain limits saved',
+        description: `${perItemSummary} ${wholeOrderSummary}`,
       });
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;
@@ -1261,55 +1259,48 @@ Don't miss out! ✨`;
     );
   };
 
+  const quickNavigationItems = [
+    { id: 'business-info', label: 'Business Info', icon: Building, color: 'text-blue-500' },
+    { id: 'branches', label: 'Branches', icon: Building, color: 'text-cyan-600' },
+    { id: 'notifications', label: 'Notifications', icon: Bell, color: 'text-yellow-500' },
+    { id: 'backend-settings', label: 'Backend Settings', icon: MessageSquare, color: 'text-indigo-500' },
+    { id: 'business-hours', label: 'Business Hours', icon: Clock, color: 'text-green-500' },
+    { id: 'announcements', label: 'Announcements', icon: Megaphone, color: 'text-orange-500' },
+    { id: 'ura-settings', label: 'URA & Tax', icon: FileJson, color: 'text-emerald-600' },
+    { id: 'payment-accounts', label: 'Payment Details', icon: CreditCard, color: 'text-teal-600' },
+    { id: 'bargain-limits', label: 'Discount Limits', icon: Percent, color: 'text-primary' },
+    { id: 'security', label: 'Security', icon: Shield, color: 'text-purple-500' },
+    { id: 'data-management', label: 'Database & Backups', icon: Database, color: 'text-red-500' },
+  ];
+  const visibleQuickNavigationItems = isAdmin
+    ? quickNavigationItems
+    : quickNavigationItems.filter(({ id }) => id === 'backend-settings' || id === 'security');
+
   return (
     <MainLayout 
       title={isAdmin ? "Settings" : "My Account"} 
       subtitle={isAdmin ? "Configure your ERP system" : "Manage your personal account settings"}
     >
       <div className="max-w-4xl space-y-6">
-        {/* Quick Navigation - Hidden for Cashiers */}
-        {isAdmin && (
+        {/* Quick Navigation - Admins see all sections; managers see their available sections. */}
+        {(isAdmin || isManager) && (
         <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 rounded-xl border border-border shadow-sm p-6">
           <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
             <SettingsIcon className="h-4 w-4" />
             Quick Navigation
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <button
-              onClick={() => document.getElementById('business-info')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="flex items-center gap-2 p-3 bg-white dark:bg-gray-900 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors text-left"
-            >
-              <Building className="h-4 w-4 text-blue-500" />
-              <span className="text-sm font-medium">Business Info</span>
-            </button>
-            <button
-              onClick={() => document.getElementById('business-hours')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="flex items-center gap-2 p-3 bg-white dark:bg-gray-900 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors text-left"
-            >
-              <Clock className="h-4 w-4 text-green-500" />
-              <span className="text-sm font-medium">Business Hours</span>
-            </button>
-            <button
-              onClick={() => document.getElementById('notifications')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="flex items-center gap-2 p-3 bg-white dark:bg-gray-900 rounded-lg hover:bg-yellow-50 dark:hover:bg-yellow-900/30 transition-colors text-left"
-            >
-              <Bell className="h-4 w-4 text-yellow-500" />
-              <span className="text-sm font-medium">Notifications</span>
-            </button>
-            <button
-              onClick={() => document.getElementById('security')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="flex items-center gap-2 p-3 bg-white dark:bg-gray-900 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors text-left"
-            >
-              <Shield className="h-4 w-4 text-purple-500" />
-              <span className="text-sm font-medium">Security</span>
-            </button>
-            <button
-              onClick={() => document.getElementById('data-management')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="flex items-center gap-2 p-3 bg-white dark:bg-gray-900 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors text-left"
-            >
-              <Database className="h-4 w-4 text-red-500" />
-              <span className="text-sm font-medium">Data Management</span>
-            </button>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {visibleQuickNavigationItems.map(({ id, label, icon: Icon, color }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="flex items-center gap-2 p-3 bg-white dark:bg-gray-900 rounded-lg hover:bg-muted transition-colors text-left"
+              >
+                <Icon className={`h-4 w-4 ${color}`} />
+                <span className="text-sm font-medium">{label}</span>
+              </button>
+            ))}
           </div>
         </div>
         )}
@@ -1864,12 +1855,12 @@ Don't miss out! ✨`;
 
         {/* Message Automation - Admin/Manager Only */}
         {(isAdmin || isManager) && (
-        <div id="message-automation" className="bg-card rounded-xl border border-border shadow-sm scroll-mt-6">
+        <div id="backend-settings" className="bg-card rounded-xl border border-border shadow-sm scroll-mt-6">
           <div className="p-6 border-b border-border">
             <div className="flex items-center gap-3">
               <MessageSquare className="h-5 w-5 text-primary" />
               <div>
-                <h2 className="text-lg font-semibold">Message Automation</h2>
+                <h2 className="text-lg font-semibold">Backend Settings: Message Automation</h2>
                 <p className="text-sm text-muted-foreground">
                   API auto-send (Twilio / Africa&apos;s Talking) when configured. Without an API, use Orders → WhatsApp Messenger to send manually from your business phone or WhatsApp Desktop.
                 </p>
@@ -2070,7 +2061,7 @@ Don't miss out! ✨`;
 
         {/* Staff Announcements - Admin Only */}
         {isAdmin && (
-        <div className="bg-card rounded-xl border border-border shadow-sm">
+        <div id="announcements" className="bg-card rounded-xl border border-border shadow-sm scroll-mt-6">
           <div className="p-6 border-b border-border">
             <div className="flex items-center gap-3">
               <Megaphone className="h-5 w-5 text-primary" />
@@ -2120,7 +2111,7 @@ Don't miss out! ✨`;
 
         {/* URA Compliance Settings - Admin Only */}
         {isAdmin && (
-        <div className="bg-card rounded-xl border border-border shadow-sm">
+        <div id="ura-settings" className="bg-card rounded-xl border border-border shadow-sm scroll-mt-6">
           <div className="p-6 border-b border-border">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -2349,7 +2340,7 @@ Don't miss out! ✨`;
 
         {/* Payment accounts for WhatsApp on-account / partial receipts - Admin Only */}
         {isAdmin && (
-        <div className="bg-card rounded-xl border border-border shadow-sm">
+        <div id="payment-accounts" className="bg-card rounded-xl border border-border shadow-sm scroll-mt-6">
           <div className="p-6 border-b border-border">
             <div className="flex items-center gap-3">
               <CreditCard className="h-5 w-5 text-primary" />
@@ -2400,7 +2391,7 @@ Don't miss out! ✨`;
 
         {/* Bargain Limits - Admin Only */}
         {isAdmin && (
-        <div className="bg-card rounded-xl border border-border shadow-sm">
+        <div id="bargain-limits" className="bg-card rounded-xl border border-border shadow-sm scroll-mt-6">
           <div className="p-6 border-b border-border">
             <div className="flex items-center gap-3">
               <Percent className="h-5 w-5 text-primary" />
@@ -2414,16 +2405,16 @@ Don't miss out! ✨`;
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                Bargain deductions are <strong>fixed amounts</strong> (not percentages) that staff can negotiate with customers. 
-                When staff apply a bargain, administrators are notified for tracking purposes.
+                Administrators choose whether staff enter per-item and whole-order discounts as percentages or fixed UGX amounts.
+                Staff only see the mode selected here. When staff apply a bargain, administrators are notified for tracking purposes.
               </AlertDescription>
             </Alert>
 
             <div className="space-y-6">
               {/* Overall limits */}
-              <div className="space-y-3">
+              {orderDiscountMode === 'amount' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Overall Order Bargain Limit (UGX)</h3>
-                <p className="text-xs text-muted-foreground">Maximum total bargain a staff member may apply across an entire order (item discounts + order bargain combined).</p>
+                <p className="text-xs text-muted-foreground">Maximum fixed UGX bargain a staff member may apply to the whole order. Per-item discounts are controlled separately.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
                     { id: 'da-overall', label: 'Desktop Agent', value: desktopAgentBargainLimit, set: setDesktopAgentBargainLimit, placeholder: '5000' },
@@ -2438,12 +2429,12 @@ Don't miss out! ✨`;
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
 
               {/* Per-item limits */}
-              <div className="space-y-3">
+              {itemDiscountMode === 'amount' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Bargain Limit (UGX)</h3>
-                <p className="text-xs text-muted-foreground">Maximum bargain a staff member may apply to a single item line. Must not exceed the overall limit above.</p>
+                <p className="text-xs text-muted-foreground">Maximum fixed UGX bargain a staff member may apply to a single item line. This ceiling is independent of the whole-order limit.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
                     { id: 'da-item', label: 'Desktop Agent', value: desktopAgentItemLimit, set: setDesktopAgentItemLimit, placeholder: '1000' },
@@ -2458,10 +2449,26 @@ Don't miss out! ✨`;
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
 
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase">Whole-Order Discount Limit</h3>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase">Whole-Order Discount Mode</h3>
+                  <div className="flex rounded-md border overflow-hidden h-9">
+                    <button type="button" onClick={() => setOrderDiscountMode('percent')}
+                      className={`px-3 text-xs font-semibold ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Percentage
+                    </button>
+                    <button type="button" onClick={() => setOrderDiscountMode('amount')}
+                      className={`px-3 text-xs font-semibold border-l ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Fixed UGX
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {orderDiscountMode === 'percent' && <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase">Whole-Order Discount Limit (%)</h3>
                 <p className="text-xs text-muted-foreground">Maximum percentage discount applied to the entire order subtotal. This setting does not change per-item discounts.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
@@ -2477,15 +2484,31 @@ Don't miss out! ✨`;
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
 
               <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Discount Mode</h3>
+                  <div className="flex rounded-md border overflow-hidden h-9">
+                    <button type="button" onClick={() => setItemDiscountMode('percent')}
+                      className={`px-3 text-xs font-semibold ${itemDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Percentage
+                    </button>
+                    <button type="button" onClick={() => setItemDiscountMode('amount')}
+                      className={`px-3 text-xs font-semibold border-l ${itemDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Fixed UGX
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {itemDiscountMode === 'percent' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Discount Limit (%)</h3>
-                <p className="text-xs text-muted-foreground">Maximum percentage staff may deduct from one selected item. Set an administrator to 100% to allow a fully complimentary item. This does not raise the whole-order percentage limit.</p>
+                <p className="text-xs text-muted-foreground">Maximum percentage each role may deduct from an item line. Set any role to 100% to allow a complimentary item. Item discounts are separate from the whole-order discount cap.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { id: 'da-item-discount', label: 'Desktop Agent', value: desktopAgentItemDiscountPercent, set: setDesktopAgentItemDiscountPercent, placeholder: '10' },
-                    { id: 'mgr-item-discount', label: 'Manager', value: managerItemDiscountPercent, set: setManagerItemDiscountPercent, placeholder: '20' },
+                    { id: 'da-item-discount', label: 'Desktop Agent', value: desktopAgentItemDiscountPercent, set: setDesktopAgentItemDiscountPercent, placeholder: '100' },
+                    { id: 'mgr-item-discount', label: 'Manager', value: managerItemDiscountPercent, set: setManagerItemDiscountPercent, placeholder: '100' },
                     { id: 'adm-item-discount', label: 'Administrator', value: adminItemDiscountPercent, set: setAdminItemDiscountPercent, placeholder: '100' },
                   ].map(({ id, label, value, set, placeholder }) => (
                     <div key={id}>
@@ -2496,14 +2519,14 @@ Don't miss out! ✨`;
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
             </div>
 
             <Alert className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
               <Shield className="h-4 w-4 text-blue-600" />
               <AlertDescription className="text-blue-800 dark:text-blue-200">
-                <strong>How it works:</strong> The per-item percentage cap controls quick discounts such as 50% or 100% on one garment.
-                Whole-order percentage limits remain independent. Fixed UGX bargains still follow the per-item and total bargain ceilings.
+                <strong>How it works:</strong> Administrators choose the allowed input mode for per-item and whole-order discounts here.
+                Staff see only the selected mode when creating orders. Percentage limits and fixed UGX limits are separate settings.
               </AlertDescription>
             </Alert>
 

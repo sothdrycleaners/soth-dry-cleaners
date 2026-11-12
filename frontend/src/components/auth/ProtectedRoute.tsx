@@ -33,6 +33,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/login" replace />;
   }
 
+  if (user?.role === 'OPERATIONS' && !user.desktop_workspace_enabled && !['/operations-demo', '/profile', '/help'].includes(location.pathname)) {
+    return <Navigate to="/operations-demo" replace />;
+  }
+
   // Keep temporary-password users on their profile until they replace it.
   if (user?.must_change_password && location.pathname !== '/profile') {
     return <Navigate to="/profile#change-password" replace />;

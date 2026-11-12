@@ -1,6 +1,6 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { authenticate } from '../middleware/auth';
+import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { requireAdminOrManager, requireAdmin } from '../middleware/permissions';
 import {
   getAllInventoryItems,
@@ -17,6 +17,7 @@ const router = express.Router();
 
 // All inventory routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Read operations: all authenticated roles (including DESKTOP_AGENT)
 router.get('/', getAllInventoryItems as any);

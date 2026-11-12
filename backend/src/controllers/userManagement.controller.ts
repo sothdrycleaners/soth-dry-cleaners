@@ -67,6 +67,7 @@ export const getAllUsers = async (req: AuthRequest, res: Response) => {
     const selectClause = `
       SELECT
         u.id, u.email, u.full_name, u.phone, u.role, u.status,
+        u.operations_access_enabled, u.desktop_workspace_enabled,
         u.created_at, u.updated_at, u.last_login, u.profile_picture, u.profile_picture_url,
         u.tenant_id, u.branch_id, b.name as branch_name,
         c.full_name as created_by_name`;
@@ -525,6 +526,41 @@ export const activateUser = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Activate user error:', error);
     res.status(500).json({ error: 'Failed to activate user' });
+  }
+};
+
+// Workspace access is a secondary permission; only administrators may grant it.
+export const updateWorkspaceAccess = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = Number(req.params.userId);
+    const { access, enabled } = req.body as { access?: string; enabled?: boolean };
+    if (!Number.isSafeInteger(userId) || userId <= 0 || typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'A valid user and enabled value are required.' });
+    }
+    const target = await query(
+      'SELECT id, email, role FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1',
+      [userId, req.user?.tenant_id]
+    );
+    if (!target.rows.length) return res.status(404).json({ error: 'User not found.' });
+    const person = target.rows[0];
+    const visibilityBlock = enforceTargetVisibility(req, person.email);
+    if (visibilityBlock) return res.status(visibilityBlock.status).json(visibilityBlock.payload);
+
+    let column: string;
+    if (access === 'operations' && person.role === UserRole.DESKTOP_AGENT) column = 'operations_access_enabled';
+    else if (access === 'desktop' && person.role === UserRole.OPERATIONS) column = 'desktop_workspace_enabled';
+    else return res.status(400).json({ error: 'This workspace grant does not apply to the selected account role.' });
+
+    const result = await query(
+      `UPDATE users SET ${column} = $1, updated_at = NOW()
+       WHERE id = $2 AND tenant_id = $3
+       RETURNING id, role, operations_access_enabled, desktop_workspace_enabled`,
+      [enabled, userId, req.user?.tenant_id]
+    );
+    return res.json({ success: true, user: result.rows[0] });
+  } catch (error) {
+    console.error('Update workspace access error:', error);
+    return res.status(500).json({ error: 'Failed to update workspace access.' });
   }
 };
 

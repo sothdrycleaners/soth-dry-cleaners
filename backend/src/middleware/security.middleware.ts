@@ -16,6 +16,16 @@ export const loginLimiter = rateLimit({
   skipFailedRequests: false,
 });
 
+export const adminPinLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many PIN attempts from this device. Please wait and try again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  skipFailedRequests: false,
+});
+
 // General API rate limiter - prevents API abuse
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes

@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import * as reportController from '../controllers/report.controller';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { UserRole } from '../models/User';
 
 const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Dashboard, revenue, customer analytics - Admin & Manager only
 router.get('/dashboard', authorize(UserRole.ADMIN, UserRole.MANAGER) as any, reportController.getDashboardStats as any);

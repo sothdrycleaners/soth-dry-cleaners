@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import { REGEXP_ONLY_DIGITS } from 'input-otp';
 import { Loader2, Mail, Lock, Sparkles, UserPlus, Eye, EyeOff } from 'lucide-react';
 import sothLogo from '@/assets/SOTH_Logo.png';
 
@@ -26,7 +28,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [lockedUntil, setLockedUntil] = useState<Date | null>(null);
   const [countdown, setCountdown] = useState(0);
-  const { login } = useAuth();
+  const { login, completeAdminPinLogin, requestAdminPinReset } = useAuth();
+  const [pinChallenge, setPinChallenge] = useState<string | null>(null);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinRequestSent, setPinRequestSent] = useState(false);
+  const [requestingPinReset, setRequestingPinReset] = useState(false);
+  const [shakePin, setShakePin] = useState(false);
 
   // Countdown timer for account lockout
   useEffect(() => {
@@ -70,6 +78,26 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
+    if (pinChallenge) {
+      if (pin.length !== 4) {
+        setPinError('Enter all four PIN digits.');
+        return;
+      }
+      setLoading(true);
+      setPinError('');
+      try {
+        await completeAdminPinLogin(pinChallenge, pin);
+      } catch (err: unknown) {
+        setPin('');
+        setPinError(err instanceof Error ? err.message : 'Incorrect PIN. Please try again.');
+        setShakePin(true);
+        window.setTimeout(() => setShakePin(false), 450);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     // Block submission if account is still locked
     if (lockedUntil && lockedUntil > new Date()) {
       return;
@@ -89,7 +117,13 @@ export default function Login() {
     setLoading(true);
 
     try {
-      await login(email, password);
+      const result = await login(email, password);
+      if (result.requiresPin && result.challengeToken) {
+        setPassword('');
+        setPinChallenge(result.challengeToken);
+        setPin('');
+        setPinError('');
+      }
     } catch (err: unknown) {
       // Provide specific error messages
       const message = err instanceof Error ? err.message : '';
@@ -113,6 +147,23 @@ export default function Login() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const appendPinDigit = (digit: string) => setPin((current) => current.length < 4 ? current + digit : current);
+
+  const handlePinResetRequest = async () => {
+    if (!pinChallenge) return;
+    setRequestingPinReset(true);
+    setPinError('');
+    try {
+      const message = await requestAdminPinReset(pinChallenge);
+      setPinRequestSent(true);
+      setPinError(message);
+    } catch (err: unknown) {
+      setPinError(err instanceof Error ? err.message : 'Unable to send the PIN removal request.');
+    } finally {
+      setRequestingPinReset(false);
     }
   };
 
@@ -158,9 +209,11 @@ export default function Login() {
         {/* Login Card */}
         <Card className="shadow-2xl border-2 animate-in fade-in slide-in-from-bottom duration-700 delay-300">
           <CardHeader className="space-y-1 pb-3 sm:pb-4 lg:pb-3">
-            <CardTitle className="text-lg sm:text-xl lg:text-lg font-bold text-center">Welcome Back</CardTitle>
+            <CardTitle className="text-lg sm:text-xl lg:text-lg font-bold text-center">
+              {pinChallenge ? 'Administrator PIN' : 'Welcome Back'}
+            </CardTitle>
             <CardDescription className="text-center text-xs sm:text-sm">
-              Sign in to manage your laundry operations
+              {pinChallenge ? 'Enter your four-digit PIN to finish signing in.' : 'Sign in to manage your laundry operations'}
             </CardDescription>
           </CardHeader>
           <CardContent className="px-3 sm:px-6 lg:px-5 pb-4 sm:pb-6 lg:pb-4">
@@ -171,6 +224,73 @@ export default function Login() {
                 </Alert>
               )}
 
+              {pinChallenge ? (
+                <div className="space-y-4 py-2">
+                  <div className="flex justify-center">
+                    <div className={shakePin ? 'animate-pin-shake' : ''}>
+                      <InputOTP
+                        maxLength={4}
+                        mask
+                        value={pin}
+                        onChange={(value) => { setPin(value); setPinError(''); }}
+                        pattern={REGEXP_ONLY_DIGITS}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        disabled={loading || requestingPinReset}
+                      >
+                        <InputOTPGroup>
+                          {[0, 1, 2, 3].map((index) => (
+                            <InputOTPSlot
+                              key={index}
+                              index={index}
+                              className={`h-12 w-12 text-lg ${pinError && !pinRequestSent ? 'border-destructive text-destructive' : ''}`}
+                            />
+                          ))}
+                        </InputOTPGroup>
+                      </InputOTP>
+                    </div>
+                  </div>
+                  <div className="mx-auto grid w-52 grid-cols-3 gap-2" aria-label="PIN keypad">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'delete'].map((key) => (
+                      <Button
+                        key={key}
+                        type="button"
+                        variant="outline"
+                        className="h-11 text-base"
+                        disabled={loading || requestingPinReset}
+                        aria-label={key === 'delete' ? 'Delete last digit' : key === 'clear' ? 'Clear PIN' : `Enter ${key}`}
+                        onClick={() => {
+                          if (key === 'delete') setPin((current) => current.slice(0, -1));
+                          else if (key === 'clear') setPin('');
+                          else appendPinDigit(key);
+                          setPinError('');
+                        }}
+                      >
+                        {key === 'delete' ? '⌫' : key === 'clear' ? 'C' : key}
+                      </Button>
+                    ))}
+                  </div>
+                  {pinError && (
+                    <Alert variant={pinRequestSent ? 'default' : 'destructive'} className="py-2">
+                      <AlertDescription className="text-xs sm:text-sm">{pinError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <Button type="submit" className="w-full h-10 font-semibold" disabled={loading || pin.length !== 4}>
+                    {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying PIN...</> : 'Verify PIN'}
+                  </Button>
+                  <div className="flex items-center justify-between text-xs">
+                    <button type="button" onClick={() => { setPinChallenge(null); setPin(''); setPinError(''); setPinRequestSent(false); }} className="text-muted-foreground hover:text-foreground hover:underline">
+                      Back to sign in
+                    </button>
+                    <button type="button" onClick={handlePinResetRequest} disabled={requestingPinReset || pinRequestSent} className="text-primary hover:underline disabled:opacity-60">
+                      {requestingPinReset ? 'Sending request...' : pinRequestSent ? 'Request sent' : 'Forgot PIN?'}
+                    </button>
+                  </div>
+                  <p className="text-center text-[11px] text-muted-foreground">
+                    PIN removal requests are reviewed by the systems administrator. Your PIN stays active until approved.
+                  </p>
+                </div>
+              ) : <>
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="text-xs sm:text-sm lg:text-xs">Email Address</Label>
                 <div className="relative">
@@ -241,10 +361,11 @@ export default function Login() {
                   'Sign In'
                 )}
               </Button>
+              </>}
             </form>
 
             {/* Create Account Link */}
-            <div className="mt-3 sm:mt-4 lg:mt-3 text-center space-y-1.5 sm:space-y-2 lg:space-y-1.5">
+            {!pinChallenge && <div className="mt-3 sm:mt-4 lg:mt-3 text-center space-y-1.5 sm:space-y-2 lg:space-y-1.5">
               <Separator />
               <p className="text-[10px] sm:text-xs text-muted-foreground pt-1">
                 Don't have an account?
@@ -259,7 +380,7 @@ export default function Login() {
                   <span className="truncate">Create Account</span>
                 </Button>
               </Link>
-            </div>
+            </div>}
           </CardContent>
         </Card>
 

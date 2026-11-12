@@ -1,6 +1,6 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { authenticate } from '../middleware/auth';
+import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import {
   getAllPromotions,
   getPromotionById,
@@ -14,6 +14,7 @@ const router = express.Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Get all promotions
 router.get('/', getAllPromotions as any);

@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import * as settingsController from '../controllers/settings.controller';
-import { authenticate } from '../middleware/auth';
+import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { canAccessSettings } from '../middleware/permissions';
 
 const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Business info - accessible to all authenticated users (read-only for cashiers)
 router.get('/business-info', settingsController.getBusinessInfo as any);

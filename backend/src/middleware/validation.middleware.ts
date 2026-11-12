@@ -68,8 +68,8 @@ export const registerValidation = [
   validateRequiredPhone,
   body('role')
     .optional()
-    .isIn(['ADMIN', 'MANAGER', 'DESKTOP_AGENT'])
-    .withMessage('Role must be one of ADMIN, MANAGER, or DESKTOP_AGENT'),
+    .isIn(['ADMIN', 'MANAGER', 'DESKTOP_AGENT', 'OPERATIONS'])
+    .withMessage('Role must be one of ADMIN, MANAGER, DESKTOP_AGENT, or OPERATIONS'),
 ];
 
 // Password reset validation

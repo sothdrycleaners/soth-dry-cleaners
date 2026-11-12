@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as userController from '../controllers/user.controller';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { UserRole } from '../models/User';
 import { userValidation } from '../middleware/validation';
 
@@ -8,6 +8,7 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate as any);
+router.use(requireDesktopWorkspaceAccess as any);
 
 // Get all users (Admin only)
 router.get('/', authorize(UserRole.ADMIN) as any, userController.getAllUsers as any);
