@@ -3,7 +3,6 @@ import { validationResult } from 'express-validator';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { resolveWriteBranchId, resolveListBranchId } from '../utils/branchScope';
-import { notifyAdministrators } from './notifications.controller';
 
 function toDateOnly(value: unknown): string | null {
   if (value == null || value === '') return null;
@@ -55,6 +54,17 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id;
     const branchId = resolveWriteBranchId(req, requestedBranchId);
 
+    if (!branchId) {
+      return res.status(400).json({ error: 'Assign this expense to an active branch before recording it.' });
+    }
+    const branchCheck = await query(
+      'SELECT id FROM branches WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE',
+      [branchId, req.user?.tenant_id]
+    );
+    if (!branchCheck.rows.length) {
+      return res.status(400).json({ error: 'Choose an active branch for this expense.' });
+    }
+
     const result = await query(
       `INSERT INTO expenses 
        (expense_date, category, description, amount, payment_method, receipt_number, submitted_by, status, created_at, branch_id)
@@ -75,11 +85,10 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
     const creatorName = req.user?.full_name || 'Staff';
     
     if (creatorRole === 'DESKTOP_AGENT') {
-      // Desktop Agent creates → Notify Manager AND Admin (both can approve)
+      // Desktop Agent creates an expense for administrator approval.
       const approvers = await query(
-        `SELECT id, full_name, role FROM users 
-         WHERE role IN ('MANAGER', 'ADMIN') AND id != $1`,
-        [userId]
+        `SELECT id, full_name, role FROM users WHERE role = 'ADMIN' AND id != $1 AND tenant_id = $2`,
+        [userId, req.user?.tenant_id]
       );
 
       for (const approver of approvers.rows) {
@@ -284,55 +293,70 @@ export const getExpenseById = async (req: AuthRequest, res: Response) => {
 export const updateExpense = async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { id } = req.params;
-    const {
-      expense_date,
-      category,
-      description,
-      amount,
-      payment_method,
-      receipt_number,
-    } = req.body;
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
     const expenseCheck = await query(
-      'SELECT status FROM expenses WHERE id = $1',
-      [id]
+      'SELECT id, status, submitted_by, expense_date, category, description, amount, payment_method, receipt_number FROM expenses WHERE id = $1 AND tenant_id = $2',
+      [id, user.tenant_id]
     );
+    if (!expenseCheck.rows.length) return res.status(404).json({ error: 'Expense not found' });
 
-    if (expenseCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Expense not found' });
+    const current = expenseCheck.rows[0];
+    const isAdmin = user.role === 'ADMIN';
+    const isOwnerPending = current.status === 'PENDING' && Number(current.submitted_by) === user.id;
+    if (!isAdmin && !isOwnerPending) {
+      return res.status(403).json({
+        error: current.status === 'APPROVED'
+          ? 'Only an administrator can edit an approved expense.'
+          : 'You can edit only your own pending expenses.',
+      });
     }
 
-    if (expenseCheck.rows[0].status === 'APPROVED') {
-      return res.status(400).json({ error: 'Cannot edit approved expense' });
-    }
+    const body = req.body;
+    const values = [
+      body.expense_date !== undefined ? body.expense_date : current.expense_date,
+      body.category !== undefined ? body.category : current.category,
+      body.description !== undefined ? body.description : current.description,
+      body.amount !== undefined ? body.amount : current.amount,
+      body.payment_method !== undefined ? body.payment_method : current.payment_method,
+      body.receipt_number !== undefined ? body.receipt_number : current.receipt_number,
+      id,
+      user.tenant_id,
+      user.role,
+      user.id,
+    ];
 
     const result = await query(
-      `UPDATE expenses 
-       SET expense_date = $1, category = $2, description = $3, amount = $4, 
+      `UPDATE expenses
+       SET expense_date = $1, category = $2, description = $3, amount = $4,
            payment_method = $5, receipt_number = $6, updated_at = NOW()
-       WHERE id = $7
+       WHERE id = $7 AND tenant_id = $8
+         AND ($9 = 'ADMIN' OR (status = 'PENDING' AND submitted_by = $10))
        RETURNING *`,
-      [expense_date, category, description, amount, payment_method, receipt_number, id]
+      values
+    );
+    if (!result.rows.length) {
+      return res.status(409).json({ error: 'This expense changed status and can no longer be edited by this account.' });
+    }
+
+    await query(
+      `INSERT INTO activity_logs (user_id, action, details, created_at)
+       VALUES ($1, 'EDIT_EXPENSE', $2, NOW())`,
+      [user.id, JSON.stringify({ expense_id: id, old_status: current.status, old_amount: current.amount, new_amount: result.rows[0].amount })]
     );
 
-    res.json({
-      message: 'Expense updated successfully',
-      expense: result.rows[0],
-    });
-
+    res.json({ message: 'Expense updated successfully', expense: normalizeExpenseRow(result.rows[0]) });
   } catch (error) {
     console.error('Update expense error:', error);
     res.status(500).json({ error: 'Failed to update expense' });
   }
 };
-
 /**
- * Approve/Reject expense (Admin/Manager permissions)
+ * Approve/reject expense (administrator only).
  */
 export const approveExpense = async (req: AuthRequest, res: Response) => {
   try {
@@ -346,42 +370,15 @@ export const approveExpense = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id;
     const approverRole = req.user?.role;
 
+    if (approverRole !== 'ADMIN') {
+      return res.status(403).json({ error: 'Only administrators can approve or reject expenses.' });
+    }
+
     const expenseCheck = await query(
-      `SELECT e.*, u.role as creator_role, u.full_name as creator_name
-       FROM expenses e
-       LEFT JOIN users u ON e.submitted_by = u.id
-       WHERE e.id = $1`,
-      [id]
+      `SELECT e.* FROM expenses e WHERE e.id = $1 AND e.tenant_id = $2`,
+      [id, req.user?.tenant_id]
     );
-
-    if (expenseCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
-
-    const expenseToApprove = expenseCheck.rows[0];
-    const creatorRole = expenseToApprove.creator_role;
-    const currentStatus = expenseToApprove.status || expenseToApprove.approval_status;
-
-    if (currentStatus !== 'PENDING' && approverRole !== 'ADMIN') {
-      return res.status(403).json({
-        error: 'Only administrators can change the status of an already decided expense',
-      });
-    }
-
-    // Permission check
-    if (creatorRole === 'DESKTOP_AGENT') {
-      if (!approverRole || !['MANAGER', 'ADMIN'].includes(approverRole)) {
-        return res.status(403).json({ 
-          error: 'Only Managers and Admins can approve/reject Desktop Agent expenses' 
-        });
-      }
-    } else if (creatorRole === 'MANAGER' || creatorRole === 'ADMIN' || !creatorRole) {
-      if (approverRole !== 'ADMIN') {
-        return res.status(403).json({ 
-          error: 'Only Admins can approve/reject this expense' 
-        });
-      }
-    }
+    if (!expenseCheck.rows.length) return res.status(404).json({ error: 'Expense not found' });
 
     let updateQuery;
     let queryParams;
@@ -397,9 +394,9 @@ export const approveExpense = async (req: AuthRequest, res: Response) => {
            rejected_at = NULL,
            rejection_reason = NULL,
            updated_at = NOW()
-       WHERE id = $4
+       WHERE id = $4 AND tenant_id = $5
        RETURNING *`;
-      queryParams = [approval_status, userId, approval_notes || null, id];
+      queryParams = [approval_status, userId, approval_notes || null, id, req.user?.tenant_id];
     } else {
       updateQuery = `UPDATE expenses 
        SET status = $1,
@@ -411,9 +408,9 @@ export const approveExpense = async (req: AuthRequest, res: Response) => {
            approved_at = NULL,
            approval_notes = NULL,
            updated_at = NOW()
-       WHERE id = $4
+       WHERE id = $4 AND tenant_id = $5
        RETURNING *`;
-      queryParams = [approval_status, userId, rejection_reason || null, id];
+      queryParams = [approval_status, userId, rejection_reason || null, id, req.user?.tenant_id];
     }
 
     const result = await query(updateQuery, queryParams);
@@ -455,15 +452,6 @@ export const approveExpense = async (req: AuthRequest, res: Response) => {
         `INSERT INTO notifications (user_id, type, title, message, link, created_at)
          VALUES ($1, 'expense', $2, $3, '/expenses', NOW())`,
         [expense.submitted_by, notificationTitle, notificationMessage]
-      );
-    }
-
-    if (approverRole === 'MANAGER') {
-      await notifyAdministrators(
-        'expense',
-        `Expense ${approval_status.toLowerCase()} by manager`,
-        `${req.user?.full_name} ${approval_status.toLowerCase()} an expense of UGX ${parseFloat(expense.amount).toLocaleString()} (${expense.description}).`,
-        '/expenses'
       );
     }
 

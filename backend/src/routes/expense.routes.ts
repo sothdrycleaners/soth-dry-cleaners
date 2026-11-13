@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
-import { authenticate, requireAdmin, requireAdminOrManager , requireDesktopWorkspaceAccess} from '../middleware/auth';
+import { authenticate, requireAdmin, requireDesktopWorkspaceAccess } from '../middleware/auth';
 import {
   recordExpense,
   getAllExpenses,
@@ -82,11 +82,11 @@ router.put(
 /**
  * @route   PATCH /api/expenses/:id/approve
  * @desc    Approve or reject expense
- * @access  Admin or Manager
+ * @access  Administrator
  */
 router.patch(
   '/:id/approve',
-  requireAdminOrManager as any,
+  requireAdmin as any,
   [
     body('approval_status')
       .isIn(['APPROVED', 'REJECTED'])

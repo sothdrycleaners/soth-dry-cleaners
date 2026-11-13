@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, DollarSign, Check, X, Eye, Calendar, Filter, Clock, Trash2, Loader2, FileDown, Printer } from 'lucide-react';
+import { Plus, DollarSign, Check, X, Eye, Calendar, Filter, Clock, Trash2, Loader2, FileDown, Printer, Pencil } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -47,6 +47,7 @@ interface Expense {
   created_at: string;
   branch_id?: number | null;
   branch_name?: string | null;
+  submitted_by?: number;
 }
 
 interface Category {
@@ -121,6 +122,7 @@ const Expenses = () => {
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [pendingRejection, setPendingRejection] = useState<number | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [exportingReport, setExportingReport] = useState(false);
@@ -174,7 +176,13 @@ const Expenses = () => {
 
   const { token, user, isAdmin, isManager } = useAuth();
   const canChooseBranch = isAdmin || isManager;
-  const [branches, setBranches] = useState<Array<{ id: number; name: string }>>([]);
+  const defaultExpenseBranchId = () => {
+    const activeBranches = branches.filter((branch) => branch.is_active !== false);
+    const assigned = activeBranches.find((branch) => branch.id === Number(user?.branch_id));
+    const defaultBranch = activeBranches.find((branch) => branch.is_default);
+    return String(assigned?.id ?? defaultBranch?.id ?? activeBranches[0]?.id ?? '');
+  };
+  const [branches, setBranches] = useState<Array<{ id: number; name: string; is_active?: boolean; is_default?: boolean }>>([]);
 
   const fetchExpenses = useCallback(async () => {
     if (!token) return;
@@ -258,31 +266,34 @@ const Expenses = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || submittingRef.current) return;
+    if (!editingExpense && !formData.branch_id) {
+      toast.error('Assign this expense to an active branch before recording it.');
+      return;
+    }
     submittingRef.current = true;
     try {
       setSubmitting(true);
-      await axios.post(`${API_BASE_URL}/expenses`, formData, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      toast.success('Expense recorded successfully');
+      if (editingExpense) {
+        await axios.put(API_BASE_URL + '/expenses/' + editingExpense.id, formData, {
+          headers: { Authorization: 'Bearer ' + token },
+        });
+        toast.success('Expense updated successfully');
+      } else {
+        await axios.post(API_BASE_URL + '/expenses', formData, {
+          headers: { Authorization: 'Bearer ' + token },
+        });
+        toast.success('Expense recorded successfully');
+      }
       setShowAddDialog(false);
-      setFormData({
-        expense_date: getLocalDateString(),
-        category: '',
-        description: '',
-        amount: '',
-        payment_method: 'CASH',
-        receipt_number: '',
-        branch_id: user?.branch_id ? String(user.branch_id) : '',
-      });
-      fetchExpenses();
-      fetchMonthlyStats();
+      setShowDetailsDialog(false);
+      setSelectedExpense(null);
+      setEditingExpense(null);
+      setFormData({ expense_date: getLocalDateString(), category: '', description: '', amount: '', payment_method: 'CASH', receipt_number: '', branch_id: defaultExpenseBranchId() });
+      await Promise.all([fetchExpenses(), fetchMonthlyStats()]);
     } catch (error: unknown) {
-      console.error('Failed to record expense:', error);
-      const errorMessage = axios.isAxiosError(error) 
-        ? error.response?.data?.error 
-        : undefined;
-      toast.error(errorMessage || 'Failed to record expense');
+      console.error(editingExpense ? 'Failed to update expense:' : 'Failed to record expense:', error);
+      const errorMessage = axios.isAxiosError(error) ? error.response?.data?.error : undefined;
+      toast.error(errorMessage || (editingExpense ? 'Failed to update expense' : 'Failed to record expense'));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -292,14 +303,29 @@ const Expenses = () => {
   const isBusy = (id: number, action?: 'APPROVED' | 'REJECTED' | 'DELETE') =>
     !!actionLoading && actionLoading.id === id && (!action || actionLoading.action === action);
 
-  const canChangeStatus = (expense: Expense, nextStatus: 'APPROVED' | 'REJECTED') => {
-    if (expense.status === nextStatus) return false;
-    if (expense.status === 'PENDING') return isAdmin || isManager;
-    return isAdmin;
-  };
+  const canChangeStatus = (expense: Expense, nextStatus: 'APPROVED' | 'REJECTED') =>
+    isAdmin && expense.status !== nextStatus;
 
   const canChangeStatusFromList = (expense: Expense, nextStatus: 'APPROVED' | 'REJECTED') =>
     expense.status === 'PENDING' && canChangeStatus(expense, nextStatus);
+
+  const canEditExpense = (expense: Expense) =>
+    isAdmin || (expense.status === 'PENDING' && Number(expense.submitted_by) === Number(user?.id));
+
+  const openExpenseForEdit = (expense: Expense) => {
+    setEditingExpense(expense);
+    setFormData({
+      expense_date: String(expense.expense_date || '').slice(0, 10),
+      category: expense.category_name,
+      description: expense.description,
+      amount: String(expense.amount),
+      payment_method: expense.payment_method || 'CASH',
+      receipt_number: expense.receipt_number || '',
+      branch_id: expense.branch_id ? String(expense.branch_id) : '',
+    });
+    setShowDetailsDialog(false);
+    setShowAddDialog(true);
+  };
 
   const requestReject = (id: number) => {
     if (actionLoading) return;
@@ -496,10 +522,8 @@ const Expenses = () => {
           </Button>
           <Button
             onClick={() => {
-            setFormData((prev) => ({
-              ...prev,
-              branch_id: user?.branch_id ? String(user.branch_id) : prev.branch_id,
-            }));
+            setEditingExpense(null);
+            setFormData({ expense_date: getLocalDateString(), category: '', description: '', amount: '', payment_method: 'CASH', receipt_number: '', branch_id: user?.branch_id ? String(user.branch_id) : '' });
             setShowAddDialog(true);
           }}
           className="gap-2 w-full sm:w-auto"
@@ -823,10 +847,10 @@ const Expenses = () => {
       </Card>
 
       {/* Add Expense Dialog */}
-      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+      <Dialog open={showAddDialog} onOpenChange={(open) => { setShowAddDialog(open); if (!open) setEditingExpense(null); }}>
         <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[96dvh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle>Record New Expense</DialogTitle>
+            <DialogTitle>{editingExpense ? 'Edit Expense' : 'Record New Expense'}</DialogTitle>
             <DialogDescription>Record a business expense for admin approval</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
@@ -841,7 +865,7 @@ const Expenses = () => {
                   required
                 />
               </div>
-              {canChooseBranch && branches.length > 0 && (
+              {canChooseBranch && branches.length > 0 && !editingExpense && (
                 <div>
                   <Label>Branch *</Label>
                   <Select
@@ -852,7 +876,7 @@ const Expenses = () => {
                       <SelectValue placeholder="Select branch" />
                     </SelectTrigger>
                     <SelectContent>
-                      {branches.map((b) => (
+                      {branches.filter((branch) => branch.is_active !== false).map((b) => (
                         <SelectItem key={b.id} value={String(b.id)}>
                           {b.name}
                         </SelectItem>
@@ -941,9 +965,9 @@ const Expenses = () => {
               >
                 Cancel
               </Button>
-              <Button type="submit" className="w-full sm:w-auto" disabled={submitting}>
+              <Button type="submit" className="w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting} aria-busy={submitting}>
                 {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {submitting ? 'Recording...' : 'Record Expense'}
+                {submitting ? (editingExpense ? 'Saving...' : 'Recording...') : (editingExpense ? 'Save Changes' : 'Record Expense')}
               </Button>
             </DialogFooter>
           </form>
@@ -1033,6 +1057,11 @@ const Expenses = () => {
           )}
           <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-between">
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              {selectedExpense && canEditExpense(selectedExpense) && (
+                <Button variant="outline" className="w-full sm:w-auto" disabled={!!actionLoading} onClick={() => openExpenseForEdit(selectedExpense)}>
+                  <Pencil className="w-4 h-4 mr-2" /> Edit Expense
+                </Button>
+              )}
               {selectedExpense && canChangeStatus(selectedExpense, 'APPROVED') && (
                 <Button
                   className="bg-green-500 hover:bg-green-600 text-white w-full sm:w-auto disabled:opacity-50"
