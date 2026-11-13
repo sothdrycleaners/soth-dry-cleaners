@@ -279,10 +279,10 @@ const Expenses = () => {
         });
         toast.success('Expense updated successfully');
       } else {
-        await axios.post(API_BASE_URL + '/expenses', formData, {
+        const response = await axios.post(API_BASE_URL + '/expenses', formData, {
           headers: { Authorization: 'Bearer ' + token },
         });
-        toast.success('Expense recorded successfully');
+        toast.success(response.data.message || 'Expense recorded successfully');
       }
       setShowAddDialog(false);
       setShowDetailsDialog(false);

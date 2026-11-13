@@ -58,26 +58,31 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Assign this expense to an active branch before recording it.' });
     }
     const branchCheck = await query(
-      'SELECT id FROM branches WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE',
+      'SELECT id, name FROM branches WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE',
       [branchId, req.user?.tenant_id]
     );
     if (!branchCheck.rows.length) {
       return res.status(400).json({ error: 'Choose an active branch for this expense.' });
     }
+    const branchName = branchCheck.rows[0].name;
 
+    const isAdminEntry = req.user?.role === 'ADMIN';
+    const initialStatus = isAdminEntry ? 'APPROVED' : 'PENDING';
     const result = await query(
-      `INSERT INTO expenses 
-       (expense_date, category, description, amount, payment_method, receipt_number, submitted_by, status, created_at, branch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', NOW(), $8)
-       RETURNING id, expense_date, description, amount, branch_id`,
-      [expense_date || new Date(), category, description, amount, payment_method || 'CASH', receipt_number, userId, branchId]
+      `INSERT INTO expenses
+       (expense_date, category, description, amount, payment_method, receipt_number, submitted_by,
+        status, approval_status, approved_by, approved_at, created_at, branch_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9,
+         CASE WHEN $8 = 'APPROVED' THEN NOW() ELSE NULL END, NOW(), $10)
+       RETURNING id, expense_date, description, amount, status, approval_status, approved_by, approved_at, branch_id`,
+      [expense_date || new Date(), category, description, amount, payment_method || 'CASH', receipt_number, userId, initialStatus, isAdminEntry ? userId : null, branchId]
     );
 
     // Log activity
     await query(
       `INSERT INTO activity_logs (user_id, action, details, created_at)
        VALUES ($1, $2, $3, NOW())`,
-      [userId, 'RECORD_EXPENSE', JSON.stringify({ expense_id: result.rows[0].id, amount, description })]
+      [userId, 'RECORD_EXPENSE', JSON.stringify({ expense_id: result.rows[0].id, amount, description, branch_id: branchId, status: initialStatus })]
     );
 
     // Professional hierarchical notification system
@@ -97,14 +102,15 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
            VALUES ($1, 'expense', 'Pending Expense Approval', $2, '/expenses', NOW())`,
           [
             approver.id,
-            `${creatorName} (Desktop Agent) submitted an expense of UGX ${parseFloat(amount).toLocaleString()} for approval. ${description}`
+            `${creatorName} submitted an expense of UGX ${parseFloat(amount).toLocaleString()} at ${branchName} for approval. ${description}`
           ]
         );
       }
     } else if (creatorRole === 'MANAGER') {
       // Manager creates → Notify Admin only (only Admin can approve)
       const admins = await query(
-        `SELECT id FROM users WHERE role = 'ADMIN'`
+        `SELECT id FROM users WHERE role = 'ADMIN' AND tenant_id = $1`,
+        [req.user?.tenant_id]
       );
 
       for (const admin of admins.rows) {
@@ -113,24 +119,14 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
            VALUES ($1, 'expense', 'Pending Expense Approval', $2, '/expenses', NOW())`,
           [
             admin.id,
-            `${creatorName} (Manager) submitted an expense of UGX ${parseFloat(amount).toLocaleString()} for approval. ${description}`
+            `${creatorName} submitted an expense of UGX ${parseFloat(amount).toLocaleString()} at ${branchName} for approval. ${description}`
           ]
         );
       }
-    } else if (creatorRole === 'ADMIN') {
-      // Admin creates → Self-notification for tracking (can self-approve)
-      await query(
-        `INSERT INTO notifications (user_id, type, title, message, link, created_at)
-         VALUES ($1, 'expense', 'Expense Pending Your Approval', $2, '/expenses', NOW())`,
-        [
-          userId,
-          `Your expense of UGX ${parseFloat(amount).toLocaleString()} is pending approval. ${description}`
-        ]
-      );
     }
 
     res.status(201).json({
-      message: 'Expense recorded successfully',
+      message: isAdminEntry ? 'Expense recorded and approved successfully' : 'Expense recorded and submitted for approval',
       expense: result.rows[0],
     });
 
