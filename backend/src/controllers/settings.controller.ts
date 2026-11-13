@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { query } from '../config/database';
+import { getClient, query, beginTenantTransaction } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 
 interface BusinessHoursDay {
@@ -202,46 +202,53 @@ export const getBusinessInfo = async (req: AuthRequest, res: Response) => {
 };
 
 export const updateBusinessInfo = async (req: AuthRequest, res: Response) => {
+  let client: Awaited<ReturnType<typeof getClient>> | null = null;
   try {
     const { name, phone, email, location, address, tin } = req.body;
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ error: 'Business name is required' });
-    }
-
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Business name is required' });
     const values: Record<string, string> = {
-      business_name: String(name).trim(),
-      business_phone: String(phone || '').trim(),
-      business_email: String(email || '').trim(),
-      business_location: String(location || '').trim(),
+      business_name: String(name).trim(), business_phone: String(phone || '').trim(),
+      business_email: String(email || '').trim(), business_location: String(location || '').trim(),
       business_address: String(address || '').trim(),
     };
-    if (tin !== undefined) {
-      values.business_tin = String(tin).trim();
-    }
-
+    if (tin !== undefined) values.business_tin = String(tin).trim();
+    client = await getClient(); await beginTenantTransaction(client);
     for (const [key, value] of Object.entries(values)) {
-      await query(
-        `INSERT INTO business_settings (setting_key, setting_value, updated_at)
-         VALUES ($1, $2, NOW())
+      await client.query(
+        `INSERT INTO business_settings (tenant_id, setting_key, setting_value, updated_at)
+         VALUES (app_current_tenant_id(), $1, $2, NOW())
          ON CONFLICT (tenant_id, setting_key)
-         DO UPDATE SET setting_value = $2, updated_at = NOW()`,
+         DO UPDATE SET setting_value=EXCLUDED.setting_value, updated_at=NOW()`,
         [key, JSON.stringify(value)]
       );
     }
-
-    res.json({
-      message: 'Business information updated',
-      name: values.business_name,
-      phone: values.business_phone,
-      email: values.business_email,
-      location: values.business_location,
-      address: values.business_address,
-      tin: values.business_tin ?? '',
-    });
+    const main = await client.query(
+      `SELECT id FROM branches WHERE tenant_id=app_current_tenant_id() AND is_default=TRUE
+       ORDER BY id ASC LIMIT 1 FOR UPDATE`
+    );
+    const contact=[values.business_phone||null,values.business_email||null,values.business_location||null,values.business_address||null];
+    if (main.rows.length) {
+      await client.query(
+        `UPDATE branches SET phone=$1,email=$2,location=$3,address=$4,updated_at=NOW()
+         WHERE id=$5 AND tenant_id=app_current_tenant_id()`,[...contact,main.rows[0].id]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO branches (tenant_id,name,code,phone,email,location,address,is_default)
+         VALUES (app_current_tenant_id(),'Main Branch','MAIN',$1,$2,$3,$4,TRUE)
+         ON CONFLICT (tenant_id,code) DO UPDATE SET phone=EXCLUDED.phone,email=EXCLUDED.email,
+         location=EXCLUDED.location,address=EXCLUDED.address,is_default=TRUE,updated_at=NOW()`,contact
+      );
+    }
+    await client.query('COMMIT');
+    res.json({message:'Business information updated and main branch synchronized',
+      name:values.business_name,phone:values.business_phone,email:values.business_email,
+      location:values.business_location,address:values.business_address,tin:values.business_tin??''});
   } catch (error) {
-    console.error('Update business info error:', error);
-    res.status(500).json({ error: 'Failed to update business info' });
-  }
+    if (client) { try { await client.query('ROLLBACK'); } catch (e) { console.error('Business info rollback failed:',e); } }
+    console.error('Update business info error:',error);
+    res.status(500).json({error:'Failed to update business info'});
+  } finally { client?.release(); }
 };
 
 // VAT Settings

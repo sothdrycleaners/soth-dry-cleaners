@@ -585,25 +585,17 @@ export default function Settings() {
 
     try {
       setSavingBusinessInfo(true);
-      await axios.post(
-        `${API_BASE_URL}/settings/bulk-update`,
-        {
-          settings: {
-            business_name: businessName.trim(),
-            business_phone: businessPhone.trim(),
-            business_email: businessEmail.trim(),
-            business_location: businessLocation.trim(),
-            business_address: businessAddress.trim(),
-          },
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await axios.put(`${API_BASE_URL}/settings/business-info`, {
+        name:businessName.trim(),phone:businessPhone.trim(),email:businessEmail.trim(),
+        location:businessLocation.trim(),address:businessAddress.trim(),
+      }, {headers:{Authorization:`Bearer ${token}`}});
 
       toast({
         title: 'Business information saved',
         description: 'These details now appear on receipts and WhatsApp messages.',
       });
       fetchURASettings();
+      fetchBranches();
     } catch (error) {
       const axiosError = error as { response?: { data?: { error?: string } } };
       toast({
@@ -1391,7 +1383,7 @@ Don't miss out! ✨`;
               <div>
                 <h2 className="text-lg font-semibold">Branches</h2>
                 <p className="text-sm text-muted-foreground">
-                  Each order is recorded against a branch. Staff are assigned a branch in User Management.
+                  The Main branch starts from Business Information. Edit its contact and payment details here; additional branches keep their own details.
                 </p>
               </div>
             </div>
@@ -1413,7 +1405,7 @@ Don't miss out! ✨`;
                           <span className="font-medium">{branch.name}</span>
                           <span className="text-xs text-muted-foreground font-mono">{branch.code}</span>
                           {branch.is_default && (
-                            <span className="text-xs rounded bg-primary/10 text-primary px-2 py-0.5">Default</span>
+                            <span className="text-xs rounded bg-primary/10 text-primary px-2 py-0.5">Main branch</span>
                           )}
                           {!branch.is_active && (
                             <span className="text-xs rounded bg-muted text-muted-foreground px-2 py-0.5">Inactive</span>

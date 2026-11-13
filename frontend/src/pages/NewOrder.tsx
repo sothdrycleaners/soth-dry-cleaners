@@ -136,6 +136,10 @@ interface Branch {
   name: string;
   code: string;
   location?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  payment_modes?: PaymentModeDetails;
   is_active: boolean;
   is_default: boolean;
 }
@@ -1035,6 +1039,17 @@ export default function NewOrder() {
 
       const customerSnapshot = selectedCustomer;
       const itemsSnapshot = [...orderItems];
+      const selectedBranch=branches.find((branch)=>String(branch.id)===String(selectedBranchId));
+      const branchBusinessInfo: BusinessInfo={
+        ...(businessInfo||{}),
+        branch_name:branches.length>1?order.branch_name||selectedBranch?.name:undefined,
+        phone:selectedBranch?.phone||businessInfo?.phone||businessPhone,
+        email:selectedBranch?.email||businessInfo?.email||'',
+        location:selectedBranch?.location||businessInfo?.location||'',
+        address:selectedBranch?.address||businessInfo?.address||'',
+      };
+      const branchPaymentModes: PaymentModeDetails=selectedBranch?.payment_modes
+        ? {...DEFAULT_PAYMENT_MODES,...selectedBranch.payment_modes}:paymentModes;
 
       toast({
         title: 'Order Created Successfully',
@@ -1075,8 +1090,8 @@ export default function NewOrder() {
           discount_amount: item.discount_amount,
           surcharge_amount: item.surcharge_amount,
         })),
-        businessInfo || (businessPhone ? { phone: businessPhone } : null),
-        paymentModes
+        branchBusinessInfo,
+        branchPaymentModes
       );
 
       resetOrderForm();

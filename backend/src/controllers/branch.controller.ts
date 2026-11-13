@@ -22,6 +22,37 @@ export const getBranches = async (req: AuthRequest, res: Response) => {
   try {
     const { active } = req.query;
 
+    // Production can run with startup migrations disabled. Ensure every tenant
+    // still has a visible default branch before listing its branches.
+    await query(
+      `INSERT INTO branches
+         (tenant_id, name, code, phone, email, location, address, is_default)
+       SELECT
+         app_current_tenant_id(),
+         'Main Branch',
+         'MAIN',
+         (SELECT NULLIF(setting_value #>> '{}', '') FROM business_settings
+          WHERE tenant_id = app_current_tenant_id() AND setting_key = 'business_phone'),
+         (SELECT NULLIF(setting_value #>> '{}', '') FROM business_settings
+          WHERE tenant_id = app_current_tenant_id() AND setting_key = 'business_email'),
+         (SELECT NULLIF(setting_value #>> '{}', '') FROM business_settings
+          WHERE tenant_id = app_current_tenant_id() AND setting_key = 'business_location'),
+         (SELECT NULLIF(setting_value #>> '{}', '') FROM business_settings
+          WHERE tenant_id = app_current_tenant_id() AND setting_key = 'business_address'),
+         TRUE
+       WHERE NOT EXISTS (
+         SELECT 1 FROM branches
+         WHERE tenant_id = app_current_tenant_id() AND is_default = TRUE
+       )
+       ON CONFLICT (tenant_id, code) DO UPDATE SET
+         phone = COALESCE(NULLIF(branches.phone, ''), EXCLUDED.phone),
+         email = COALESCE(NULLIF(branches.email, ''), EXCLUDED.email),
+         location = COALESCE(NULLIF(branches.location, ''), EXCLUDED.location),
+         address = COALESCE(NULLIF(branches.address, ''), EXCLUDED.address),
+         is_default = TRUE,
+         updated_at = NOW()`
+    );
+
     let sql = `SELECT ${BRANCH_COLUMNS} FROM branches WHERE tenant_id = app_current_tenant_id()`;
     const values: any[] = [];
     if (active !== undefined) {
