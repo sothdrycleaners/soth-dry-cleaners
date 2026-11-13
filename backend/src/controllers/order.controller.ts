@@ -448,6 +448,14 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const priceItem = priceResult.rows[0];
       const serviceType = item.service_type?.toUpperCase(); // Normalize to uppercase
       const quantity = Number(item.quantity);
+      let expressDueAt: Date | null = null;
+      if (serviceType === 'EXPRESS') {
+        const parsedExpressDueAt = item.express_due_at ? new Date(item.express_due_at) : null;
+        if (!parsedExpressDueAt || !Number.isFinite(parsedExpressDueAt.getTime()) || parsedExpressDueAt.getTime() <= Date.now()) {
+          throw new Error('Choose a future Express needed-by time for each Express item');
+        }
+        expressDueAt = parsedExpressDueAt;
+      }
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new Error(`Invalid quantity for item ID ${item.price_item_id}`);
@@ -559,7 +567,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         surcharge_amount: requestedItemSurcharge,
         total_price: itemTotal,
         item_discount_percent: requestedItemDiscountPercent,
-        notes: itemNotes
+        notes: itemNotes,
+        express_due_at: expressDueAt
       });
     }
     
@@ -788,9 +797,10 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           discount_amount,
           surcharge_amount,
           total_price,
-          notes
+          notes,
+          express_due_at
         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           orderId, 
           item.price_item_id, 
@@ -800,7 +810,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           item.discount_amount || 0,
           item.surcharge_amount || 0,
           item.total_price,
-          item.notes
+          item.notes,
+          item.express_due_at
         ]
       );
     }

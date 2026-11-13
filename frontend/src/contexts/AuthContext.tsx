@@ -390,7 +390,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     const redirectPath = consumePostLoginRedirect();
-    navigate(redirectPath || (data.user.role === 'OPERATIONS' ? '/operations-demo' : '/dashboard'));
+    navigate(redirectPath || (data.user.role === 'OPERATIONS' ? '/operations' : '/dashboard'));
   };
 
   const login = async (email: string, password: string) => {

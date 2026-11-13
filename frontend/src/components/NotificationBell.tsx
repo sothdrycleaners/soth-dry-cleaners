@@ -121,6 +121,13 @@ export const NotificationBell = ({ token, userRole }: NotificationBellProps) => 
     if (notification.type === 'PENDING_PAYMENT' && notification.data?.pending_payment_id) {
       navigate('/payments'); // Will open Payments page, user can switch to Pending tab
       setOpen(false);
+    } else if (notification.data?.operations_message_id && notification.data?.sender_user_id) {
+      const senderId = Number(notification.data.sender_user_id);
+      if (Number.isSafeInteger(senderId) && senderId > 0) {
+        navigate(`/messages?tab=team&peer=${senderId}`);
+        setOpen(false);
+        return;
+      }
     } else if (notification.type === 'PAYMENT_ASSIGNED' && notification.data?.order_id) {
       navigate(`/orders`); // Navigate to orders
       setOpen(false);

@@ -7,15 +7,17 @@ interface ProtectedRouteProps {
   requireAdmin?: boolean;
   requireManager?: boolean; // Admin or Manager
   requireSystemAdmin?: boolean;
+  requireOperations?: boolean;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ 
   children, 
   requireAdmin = false,
   requireManager = false,
-  requireSystemAdmin = false
+  requireSystemAdmin = false,
+  requireOperations = false
 }) => {
-  const { isAuthenticated, isAdmin, isManager, isSystemAdmin, loading, user } = useAuth();
+  const { isAuthenticated, isAdmin, isManager, isSystemAdmin, canAccessOperations, loading, user } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -33,13 +35,17 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/login" replace />;
   }
 
-  if (user?.role === 'OPERATIONS' && !user.desktop_workspace_enabled && !['/operations-demo', '/profile', '/help'].includes(location.pathname)) {
-    return <Navigate to="/operations-demo" replace />;
+  if (user?.role === 'OPERATIONS' && !user.desktop_workspace_enabled && !['/operations', '/profile', '/help'].includes(location.pathname)) {
+    return <Navigate to="/operations" replace />;
   }
 
   // Keep temporary-password users on their profile until they replace it.
   if (user?.must_change_password && location.pathname !== '/profile') {
     return <Navigate to="/profile#change-password" replace />;
+  }
+
+  if (requireOperations && !canAccessOperations) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   // Strict admin-only check

@@ -141,6 +141,9 @@ export default function Settings() {
   // Branches
   const [branches, setBranches] = useState<BranchRecord[]>([]);
   const [savingBranch, setSavingBranch] = useState(false);
+  const [messageRetentionDays, setMessageRetentionDays] = useState('30');
+  const [savedMessageRetentionDays, setSavedMessageRetentionDays] = useState('30');
+  const [savingMessageRetention, setSavingMessageRetention] = useState(false);
   const [newBranch, setNewBranch] = useState({ name: '', location: '', phone: '', email: '' });
   const [vatRate, setVatRate] = useState('18.00');
   const [standardKgRate, setStandardKgRate] = useState('10000');
@@ -423,6 +426,9 @@ export default function Settings() {
     if (isAdmin) {
       fetchBranches();
       fetchBargainLimits();
+      axios.get(`${API_BASE_URL}/settings/message-retention`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((res) => { const saved = res.data.retention_days === null ? 'permanent' : String(res.data.retention_days ?? 30); setMessageRetentionDays(saved); setSavedMessageRetentionDays(saved); })
+        .catch(() => { setMessageRetentionDays('30'); setSavedMessageRetentionDays('30'); });
       axios
         .get(`${API_BASE_URL}/settings/payment-accounts`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -1252,6 +1258,7 @@ Don't miss out! ✨`;
   };
 
   const quickNavigationItems = [
+    { id: 'message-retention', label: 'Message Retention', icon: MessageSquare, color: 'text-indigo-500' },
     { id: 'business-info', label: 'Business Info', icon: Building, color: 'text-blue-500' },
     { id: 'branches', label: 'Branches', icon: Building, color: 'text-cyan-600' },
     { id: 'notifications', label: 'Notifications', icon: Bell, color: 'text-yellow-500' },
@@ -1586,12 +1593,12 @@ Don't miss out! ✨`;
                       <div className="border-t border-border bg-muted/30 p-4 space-y-3">
                         <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                           <CreditCard className="h-4 w-4" />
-                          Payment mode details for <strong>{branch.name}</strong>
-                          <span className="ml-1 text-xs font-normal">— appear on WhatsApp receipts for this branch</span>
+                          Payment details for <strong>{branch.name}</strong>
+                          <span className="ml-1 text-xs font-normal">— used on WhatsApp receipts for this branch. The same code can be used at other branches.</span>
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
-                            <Label className="text-xs">Centenary Account No</Label>
+                            <Label className="text-xs">Bank account number</Label>
                             <Input
                               value={branchPaymentDraft[branch.id]?.centenary_account ?? ''}
                               onChange={(e) => setBranchPaymentDraft(prev => ({
@@ -1603,7 +1610,7 @@ Don't miss out! ✨`;
                             />
                           </div>
                           <div>
-                            <Label className="text-xs">MTN Code No</Label>
+                            <Label className="text-xs">MTN MoMo Pay code</Label>
                             <Input
                               value={branchPaymentDraft[branch.id]?.mtn_code ?? ''}
                               onChange={(e) => setBranchPaymentDraft(prev => ({
@@ -1615,7 +1622,7 @@ Don't miss out! ✨`;
                             />
                           </div>
                           <div>
-                            <Label className="text-xs">Airtel Merchant No</Label>
+                            <Label className="text-xs">Airtel Pay code</Label>
                             <Input
                               value={branchPaymentDraft[branch.id]?.airtel_merchant ?? ''}
                               onChange={(e) => setBranchPaymentDraft(prev => ({
@@ -1841,6 +1848,54 @@ Don't miss out! ✨`;
             >
               {savingNotifications ? 'Saving...' : 'Save Notification Settings'}
             </Button>
+          </div>
+        </div>
+        )}
+
+        {isAdmin && (
+        <div id="message-retention" className="bg-card rounded-xl border border-border shadow-sm scroll-mt-6">
+          <div className="p-6 border-b border-border">
+            <div className="flex items-center gap-3">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              <div>
+                <h2 className="text-lg font-semibold">Staff Message History</h2>
+                <p className="text-sm text-muted-foreground">Control how long internal staff and Operations conversations are retained.</p>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-4 p-6">
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <div>
+                <Label htmlFor="message-retention-days">Keep messages for</Label>
+                <Select value={messageRetentionDays} onValueChange={setMessageRetentionDays}>
+                  <SelectTrigger id="message-retention-days" className="mt-2"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[7, 14, 30, 60, 90, 180, 365].map((days) => <SelectItem key={days} value={String(days)}>{days === 30 ? '30 days (recommended default)' : `${days} days`}</SelectItem>)}
+                    <SelectItem value="permanent">Keep permanently</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button disabled={savingMessageRetention} onClick={async () => {
+                const nextDays = messageRetentionDays === 'permanent' ? null : Number(messageRetentionDays);
+                const previousDays = savedMessageRetentionDays === 'permanent' ? null : Number(savedMessageRetentionDays);
+                if (nextDays !== null && (previousDays === null || nextDays < previousDays) && !window.confirm(`This will permanently delete staff messages older than ${nextDays} days during the next daily cleanup. Continue?`)) return;
+                setSavingMessageRetention(true);
+                try {
+                  await axios.put(`${API_BASE_URL}/settings/message-retention`, { retention_days: nextDays }, { headers: { Authorization: `Bearer ${token}` } });
+                  setSavedMessageRetentionDays(messageRetentionDays);
+                  toast({ title: 'Message retention saved', description: messageRetentionDays === 'permanent' ? 'Messages will be kept until this setting is changed.' : `Messages older than ${messageRetentionDays} days will be permanently deleted during the daily cleanup.` });
+                } catch (error) {
+                  toast({ title: 'Could not save message retention', description: (error as AxiosError<{ error?: string }>).response?.data?.error || 'Try again.', variant: 'destructive' });
+                } finally {
+                  setSavingMessageRetention(false);
+                }
+              }}>{savingMessageRetention ? 'Saving...' : 'Save retention'}</Button>
+            </div>
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Automatic cleanup across all branches</AlertTitle>
+              <AlertDescription>New businesses start with 30 days. Choose at least 7 days or keep messages permanently. Expired messages and their related notifications are permanently removed once daily. A shorter setting can remove old history on the next cleanup.</AlertDescription>
+            </Alert>
           </div>
         </div>
         )}
@@ -2337,9 +2392,9 @@ Don't miss out! ✨`;
             <div className="flex items-center gap-3">
               <CreditCard className="h-5 w-5 text-primary" />
               <div>
-                <h2 className="text-lg font-semibold">Payment Mode Details</h2>
+                <h2 className="text-lg font-semibold">Fallback Payment Details</h2>
                 <p className="text-sm text-muted-foreground">
-                  Shown on unpaid, partial, and on-account WhatsApp receipts (not on fully paid orders)
+                  Used when a branch has not set its own payment details. Branch settings take priority on WhatsApp messages.
                 </p>
               </div>
             </div>
@@ -2347,7 +2402,7 @@ Don't miss out! ✨`;
           <div className="p-6 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <Label htmlFor="centenary-account">Centenary account No</Label>
+                <Label htmlFor="centenary-account">Bank account number</Label>
                 <Input
                   id="centenary-account"
                   value={centenaryAccount}
@@ -2356,7 +2411,7 @@ Don't miss out! ✨`;
                 />
               </div>
               <div>
-                <Label htmlFor="mtn-code">MTN code no</Label>
+                <Label htmlFor="mtn-code">MTN MoMo Pay code</Label>
                 <Input
                   id="mtn-code"
                   value={mtnCode}
@@ -2365,7 +2420,7 @@ Don't miss out! ✨`;
                 />
               </div>
               <div>
-                <Label htmlFor="airtel-merchant">Airtel merchant no</Label>
+                <Label htmlFor="airtel-merchant">Airtel Pay code</Label>
                 <Input
                   id="airtel-merchant"
                   value={airtelMerchant}

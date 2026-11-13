@@ -94,6 +94,7 @@ interface OrderItem {
   price_item_id: number;
   item_name: string;
   service_type: 'WASH' | 'IRON' | 'EXPRESS';
+  express_due_at?: string | null;
   quantity: number;
   unit_price: number;
   base_unit_price?: number;
@@ -130,6 +131,10 @@ interface OrderItem {
 }
 
 const ITEM_NOTE_MAX = 200;
+const toLocalDateTimeInput = (date: Date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+};
 
 interface Branch {
   id: number;
@@ -551,6 +556,7 @@ export default function NewOrder() {
           price_item_id: item.id,
           item_name: item.name,
           service_type: serviceType,
+          express_due_at: serviceType === 'EXPRESS' ? null : undefined,
           quantity: startQty,
           unit_price: currentUnitPrice,
           base_unit_price: unitPrice,
@@ -958,6 +964,19 @@ export default function NewOrder() {
 
   const handleCreateOrder = async () => {
     if (creatingOrderRef.current) return;
+    const invalidExpressItem = orderItems.find((item) =>
+      item.service_type === 'EXPRESS' &&
+      (!item.express_due_at || !Number.isFinite(new Date(item.express_due_at).getTime()) || new Date(item.express_due_at).getTime() <= Date.now())
+    );
+    if (invalidExpressItem) {
+      toast({
+        variant: 'destructive',
+        title: 'Express deadline required',
+        description: 'Choose a future “Needed by” time for each Express item before creating the order.',
+      });
+      return;
+    }
+
     if (!selectedCustomer) {
       toast({
         variant: 'destructive',
@@ -1048,8 +1067,11 @@ export default function NewOrder() {
         location:selectedBranch?.location||businessInfo?.location||'',
         address:selectedBranch?.address||businessInfo?.address||'',
       };
-      const branchPaymentModes: PaymentModeDetails=selectedBranch?.payment_modes
-        ? {...DEFAULT_PAYMENT_MODES,...selectedBranch.payment_modes}:paymentModes;
+      const hasBranchPaymentModes = Object.values(selectedBranch?.payment_modes || {})
+        .some((value) => String(value || '').trim());
+      const branchPaymentModes: PaymentModeDetails = hasBranchPaymentModes
+        ? { ...paymentModes, ...selectedBranch?.payment_modes }
+        : paymentModes;
 
       toast({
         title: 'Order Created Successfully',
@@ -1366,6 +1388,29 @@ export default function NewOrder() {
                         </span>
                       </div>
 
+                      {item.service_type === 'EXPRESS' && (
+                        <div className="flex flex-wrap items-end gap-3 rounded-md border border-orange-200 bg-orange-50/70 p-2 dark:border-orange-900 dark:bg-orange-950/20">
+                          <label className="grid gap-1 text-xs font-medium text-orange-900 dark:text-orange-200">
+                            Express needed by
+                            <Input
+                              type="datetime-local"
+                              required
+                              min={toLocalDateTimeInput(new Date())}
+                              value={item.express_due_at ? toLocalDateTimeInput(new Date(item.express_due_at)) : ''}
+                              onChange={(event) => {
+                                const dueAt = event.target.value ? new Date(event.target.value).toISOString() : null;
+                                setOrderItems((current) => current.map((line, lineIndex) =>
+                                  lineIndex === index ? { ...line, express_due_at: dueAt } : line
+                                ));
+                              }}
+                              className="h-9 w-60 bg-background text-sm"
+                            />
+                          </label>
+                          <span className="pb-2 text-xs text-orange-800 dark:text-orange-300">
+                            Operations will see this deadline. The order remains usable at the desk.
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-1">
                         <Button
                           size="icon"

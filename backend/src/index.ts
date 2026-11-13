@@ -11,6 +11,7 @@ import {
   extractRealIP 
 } from './middleware/security.middleware';
 import { initializeBackupScheduler } from './services/backup.scheduler';
+import { initializeMessageRetentionScheduler } from './services/message-retention.scheduler';
 import { cleanupOldReceipts } from './services/pdf.service';
 import path from 'path';
 import dns from 'dns';
@@ -272,6 +273,8 @@ const startServer = async () => {
         console.log('⏸️  Backup scheduler disabled in development mode');
       }
       
+      initializeMessageRetentionScheduler();
+
       // Schedule PDF receipt cleanup (every 24 hours)
       setInterval(() => {
         console.log('🧹 Running scheduled PDF cleanup...');

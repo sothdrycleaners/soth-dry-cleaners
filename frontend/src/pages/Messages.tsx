@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { API_BASE_URL } from '@/lib/api';
 import { Plus, Send, CheckCircle2, XCircle, Clock, Search, MessageSquare, Smartphone, Tag, Percent, Calendar, Trash2, Sparkles, List, Settings } from "lucide-react";
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -18,6 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import axios from "axios";
+import TeamMessagesPanel from "@/components/TeamMessagesPanel";
 
 interface Message {
   id: number;
@@ -190,6 +192,7 @@ Soth Dry Cleaners - Clean uniforms, confident students. ✨`
 
 export default function Messages() {
   const { token } = useAuth();
+  const [routeParams] = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]); // Initialize as empty array
   const [selectedCustomers, setSelectedCustomers] = useState<number[]>([]);
@@ -200,6 +203,7 @@ export default function Messages() {
   const [campaignName, setCampaignName] = useState(""); // Track campaign name for bulk sends
   const [sendMethod, setSendMethod] = useState<'whatsapp' | 'sms'>('whatsapp'); // Method selection
   const [activeTab, setActiveTab] = useState("campaigns"); // Changed default to campaigns
+  useEffect(() => { if (routeParams.get("tab") === "team") setActiveTab("team"); }, [routeParams]);
   const [stats, setStats] = useState({
     total: 0,
     delivered: 0,
@@ -594,12 +598,13 @@ Don't miss out! ✨`;
       </Card>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2 lg:w-auto">
+        <TabsList className="grid w-full grid-cols-3 lg:w-auto">
           <TabsTrigger value="campaigns" className="gap-1 sm:gap-2 text-xs sm:text-sm">
             <Sparkles className="h-4 w-4 shrink-0" />
             <span className="hidden min-[400px]:inline">Promotional</span>
             <span className="min-[400px]:hidden">Promo</span>
           </TabsTrigger>
+          <TabsTrigger value="team" className="gap-1 sm:gap-2 text-xs sm:text-sm"><MessageSquare className="h-4 w-4 shrink-0" /><span>Team inbox</span></TabsTrigger>
           <TabsTrigger value="history" className="gap-1 sm:gap-2 text-xs sm:text-sm">
             <Clock className="h-4 w-4 shrink-0" />
             <span className="truncate">Message History</span>
@@ -987,6 +992,7 @@ Don't miss out! ✨`;
             </CardContent>
           </Card>
         </TabsContent>
+        <TabsContent value="team" className="space-y-4"><div><h2 className="text-lg font-semibold">Operations and desktop staff</h2><p className="text-sm text-muted-foreground">Private staff conversations with in-app notifications.</p></div><TeamMessagesPanel /></TabsContent>
       </Tabs>
 
       {/* Bulk Send Dialog */}

@@ -200,7 +200,7 @@ export function MainLayout({ children, title, subtitle, demoMode = false, operat
               </div>
             )}
             <ThemeToggle />
-            {demoMode ? <DemoNotificationMenu onOpenQueue={() => navigate('/operations-demo?view=queue')} /> : <NotificationDropdown />}
+            {demoMode ? <DemoNotificationMenu onOpenQueue={() => navigate('/operations?view=queue')} /> : <NotificationDropdown />}
             {demoMode ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

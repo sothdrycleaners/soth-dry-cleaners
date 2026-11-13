@@ -30,7 +30,7 @@ const Profile = lazy(() => import("./pages/Profile"));
 const Help = lazy(() => import("./pages/Help"));
 const UserManagement = lazy(() => import("./pages/UserManagement"));
 const PasswordResetRequests = lazy(() => import("./pages/PasswordResetRequests"));
-const OperationsDemo = lazy(() => import("./pages/OperationsDemo"));
+const OperationsLive = lazy(() => import("./pages/OperationsLive"));
 const Expenses = lazy(() => import("./pages/Expenses"));
 const FinancialDashboard = lazy(() => import("./pages/FinancialDashboard"));
 const Accounting = lazy(() => import("./pages/Accounting"));
@@ -142,10 +142,8 @@ const App = () => {
                 path="/forgot-password"
                 element={<Suspense fallback={authFallback}><ForgotPassword /></Suspense>}
               />
-              <Route
-                path="/operations-demo"
-                element={<Suspense fallback={authFallback}><OperationsDemo /></Suspense>}
-              />
+              <Route path="/operations-demo" element={<Navigate to="/operations" replace />} />
+              <Route path="/operations" element={<Suspense fallback={routeFallback}><ProtectedRoute requireOperations><OperationsLive /></ProtectedRoute></Suspense>} />
 
               {/* ── Protected: Change Password ── */}
               <Route

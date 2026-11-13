@@ -22,6 +22,10 @@ router.get('/all', settingsController.getAllSettings as any);
 router.get('/vat', settingsController.getVATSettings as any);
 router.put('/vat', canAccessSettings as any, settingsController.updateVATSettings as any);
 
+// Internal staff message retention - Admin only
+router.get('/message-retention', canAccessSettings as any, settingsController.getMessageRetention as any);
+router.put('/message-retention', canAccessSettings as any, settingsController.updateMessageRetention as any);
+
 // Bargain limits - Admin only
 router.get('/bargain-limits', canAccessSettings as any, settingsController.getBargainLimits as any);
 router.post('/bargain-limits', canAccessSettings as any, settingsController.updateBargainLimits as any);

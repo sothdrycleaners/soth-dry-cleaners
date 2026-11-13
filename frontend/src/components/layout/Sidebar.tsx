@@ -1,8 +1,10 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { API_ORIGIN } from '@/lib/api';
+import api from '@/lib/api';
 import { resolveProfilePictureUrl } from '@/lib/profilePicture';
 import {
   LayoutDashboard,
@@ -38,7 +40,7 @@ const navigation = [
   { name: 'Payments', href: '/payments', icon: Wallet },
   { name: 'Expenses', href: '/expenses', icon: Receipt },
   { name: 'Customers', href: '/customers', icon: Users },
-  { name: 'Messages', href: '/messages', icon: MessageSquare },
+  { name: 'Messages', href: '/messages?tab=team', icon: MessageSquare },
   { name: 'Campaigns', href: '/campaigns', icon: Megaphone },
   { name: 'Price List', href: '/prices', icon: DollarSign },
   { name: 'Inventory', href: '/inventory', icon: Package },
@@ -57,12 +59,12 @@ const secondaryNavigation = [
   { name: 'Help', href: '/help', icon: HelpCircle },
 ];
 
-const operationsDemoNavigation = [
-  { name: 'Operations Workspace', href: '/operations-demo?view=dashboard', view: 'dashboard', icon: LayoutDashboard },
-  { name: 'Work Queue', href: '/operations-demo?view=queue', view: 'queue', icon: ClipboardList },
-  { name: 'Messages', href: '/operations-demo?view=messages', view: 'messages', icon: MessageSquare },
-  { name: 'Reports', href: '/operations-demo?view=reports', view: 'reports', icon: BarChart3 },
-  { name: 'Delivered Items', href: '/operations-demo?view=delivered', view: 'delivered', icon: PackageCheck },
+const operationsNavigation = [
+  { name: 'Operations Workspace', href: '/operations?view=dashboard', view: 'dashboard', icon: LayoutDashboard },
+  { name: 'Work Queue', href: '/operations?view=queue', view: 'queue', icon: ClipboardList },
+  { name: 'Messages', href: '/operations?view=messages', view: 'messages', icon: MessageSquare },
+  { name: 'Reports', href: '/operations?view=reports', view: 'reports', icon: BarChart3 },
+  { name: 'Delivered Items', href: '/operations?view=delivered', view: 'delivered', icon: PackageCheck },
 ];
 
 interface SidebarProps {
@@ -77,10 +79,20 @@ export function Sidebar({ isOpen, hasInteracted = false, onClose, demoMode = fal
   const isMobile = useIsMobile();
   const location = useLocation();
   const { user, isAdmin, isCashier, isManager, canAccessSettings, canAccessOperations, canAccessDesktopWorkspace } = useAuth();
+  const [teamUnreadCount, setTeamUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => api.get('/operations/unread-count')
+      .then(response => setTeamUnreadCount(Number(response.data.count) || 0))
+      .catch(() => undefined);
+    void refresh();
+    const timer = window.setInterval(refresh, 20000);
+    return () => window.clearInterval(timer);
+  }, [user?.id]);
 
   // Filter main navigation based on role
-  const visibleNavigation = demoMode || operationsMode ? operationsDemoNavigation : navigation.filter(item => {
-    if (item.href === '/operations-demo') return canAccessOperations;
+  const visibleNavigation = demoMode || operationsMode ? operationsNavigation : navigation.filter(item => {
+    if (item.href === '/operations') return canAccessOperations;
     if (user?.role === 'OPERATIONS' && !user.desktop_workspace_enabled) return false;
     if (isAdmin) return true; // Admin sees everything
 
@@ -169,7 +181,7 @@ export function Sidebar({ isOpen, hasInteracted = false, onClose, demoMode = fal
             const currentView = new URLSearchParams(location.search).get('view') ?? 'dashboard';
             const isActive = demoMode || operationsMode
               ? 'view' in item && currentView === item.view
-              : location.pathname === item.href || (item.href !== '/' && location.pathname.startsWith(item.href));
+              : location.pathname === item.href.split('?')[0] || (item.href.split('?')[0] !== '/' && location.pathname.startsWith(item.href.split('?')[0]));
             const displayName = isCashier && item.href === '/reports' ? 'My Performance' : item.name;
             return (
               <li key={item.name}>
@@ -179,6 +191,11 @@ export function Sidebar({ isOpen, hasInteracted = false, onClose, demoMode = fal
                 >
                   <item.icon className="h-5 w-5 flex-shrink-0" />
                   <span className="font-medium truncate">{displayName}</span>
+                  {item.name === 'Messages' && teamUnreadCount > 0 && (
+                    <span className="ml-auto rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-bold leading-4 text-white">
+                      {teamUnreadCount > 99 ? '99+' : teamUnreadCount}
+                    </span>
+                  )}
                 </Link>
               </li>
             );
@@ -189,8 +206,8 @@ export function Sidebar({ isOpen, hasInteracted = false, onClose, demoMode = fal
         {!demoMode && !operationsMode && canAccessOperations && (
           <div className="mt-4 border-t border-sidebar-border pt-4">
             <Link
-              to="/operations-demo"
-              className={cn('nav-item', location.pathname === '/operations-demo' && 'active')}
+              to="/operations"
+              className={cn('nav-item', location.pathname === '/operations' && 'active')}
             >
               <WashingMachine className="h-5 w-5 flex-shrink-0" />
               <span className="font-medium truncate">Operations</span>

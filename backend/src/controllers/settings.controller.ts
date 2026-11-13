@@ -18,6 +18,45 @@ interface BusinessHours {
   saturday: BusinessHoursDay;
 }
 
+const MESSAGE_RETENTION_OPTIONS = [7, 14, 30, 60, 90, 180, 365];
+
+export const getMessageRetention = async (_req: AuthRequest, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT setting_value FROM business_settings WHERE setting_key='message_retention_days' AND tenant_id=app_current_tenant_id()`
+    );
+    if (!result.rows.length) return res.json({ retention_days: 30 });
+    const raw = result.rows[0].setting_value;
+    const value = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return raw; } })() : raw;
+    if (value === null || value === 'permanent') return res.json({ retention_days: null });
+    const days = Number(value);
+    res.json({ retention_days: MESSAGE_RETENTION_OPTIONS.includes(days) ? days : 30 });
+  } catch (error) {
+    console.error('Get message retention error:', error);
+    res.status(500).json({ error: 'Failed to load message retention setting' });
+  }
+};
+
+export const updateMessageRetention = async (req: AuthRequest, res: Response) => {
+  const raw = req.body.retention_days;
+  const days = raw === null || raw === 'permanent' ? null : Number(raw);
+  if (days !== null && !MESSAGE_RETENTION_OPTIONS.includes(days)) {
+    return res.status(400).json({ error: 'Choose a retention period of at least 7 days or permanent retention' });
+  }
+  try {
+    await query(
+      `INSERT INTO business_settings(tenant_id,setting_key,setting_value,updated_at)
+       VALUES(app_current_tenant_id(),'message_retention_days',$1::jsonb,NOW())
+       ON CONFLICT(tenant_id,setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value,updated_at=NOW()`,
+      [JSON.stringify(days)]
+    );
+    res.json({ retention_days: days, message: 'Message retention setting saved' });
+  } catch (error) {
+    console.error('Update message retention error:', error);
+    res.status(500).json({ error: 'Failed to save message retention setting' });
+  }
+};
+
 export const getBusinessHours = async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(
