@@ -213,6 +213,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     navigate('/login');
   }, [navigate]);
 
+  // Keep other tabs in sync when this session is signed out elsewhere. Without
+  // this, a tab can retain a stale user object after its shared localStorage
+  // token is removed and keep calling APIs without an Authorization header.
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage) return;
+      if ((event.key === TOKEN_KEY && !event.newValue) || event.key === null) {
+        logout();
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [logout]);
+
   // Reset inactivity timer
   const resetInactivityTimer = useCallback(() => {
     // Clear existing timers

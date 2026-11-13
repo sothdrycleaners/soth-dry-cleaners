@@ -49,7 +49,7 @@ export function MainLayout({ children, title, subtitle, demoMode = false, operat
   const [businessHours, setBusinessHours] = useState<BusinessHours | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { token, user, logout } = useAuth();
+  const { token, user, logout, canAccessDesktopWorkspace } = useAuth();
 
   // Update sidebar state when screen size changes (but mark as interacted to enable transitions)
   useEffect(() => {
@@ -238,7 +238,7 @@ export function MainLayout({ children, title, subtitle, demoMode = false, operat
               </button>
             ) : (
               <>
-              {operationsMode && onExitOperations && (
+              {operationsMode && onExitOperations && canAccessDesktopWorkspace && (
                 <button onClick={onExitOperations} className="hidden sm:inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-muted" title="Return to the main workspace">Exit Operations</button>
               )}
               <button onClick={() => logout()} className="p-2 rounded-lg hover:bg-muted transition-colors" title="Logout" aria-label="Logout">
