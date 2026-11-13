@@ -94,6 +94,7 @@ export const getBranchPerformance = async (req: AuthRequest, res: Response) => {
          b.name AS branch_name,
          b.code AS branch_code,
          b.is_active,
+         b.is_default,
          COUNT(o.id) AS total_orders,
          COALESCE(SUM(COALESCE(o.total_amount, o.total, 0)), 0) AS total_billed,
          COALESCE(SUM(COALESCE(o.amount_paid, 0)), 0) AS total_collected,
@@ -105,8 +106,8 @@ export const getBranchPerformance = async (req: AuthRequest, res: Response) => {
          ON o.branch_id = b.id
         AND LOWER(COALESCE(o.status::text, '')) <> 'cancelled'
         ${dateFilter}
-       GROUP BY b.id, b.name, b.code, b.is_active
-       ORDER BY total_billed DESC, b.name ASC`,
+       GROUP BY b.id, b.name, b.code, b.is_active, b.is_default
+       ORDER BY b.is_default DESC, total_billed DESC, b.name ASC`,
       values
     );
 

@@ -552,7 +552,7 @@ export default function Dashboard() {
           <p className="text-sm text-muted-foreground mb-4">
             Click a branch to view its revenue and orders. Choose All Branches to return to the company total.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className={`grid grid-cols-1 md:grid-cols-2 ${branchPerformance.length > 2 ? 'xl:grid-cols-3' : ''} gap-4`}>
             {branchPerformance.map((branch) => (
               <button
                 type="button"

@@ -108,6 +108,7 @@ export default function Settings() {
   const { toast } = useToast();
   const isManager = user?.role === 'MANAGER';
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [branchConfirm, setBranchConfirm] = useState<{ id: number; name: string; action: 'deactivate' | 'delete' } | null>(null);
   const [selectedYear, setSelectedYear] = useState('');
   const [orderStats, setOrderStats] = useState<{ count: number; totalAmount: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -494,6 +495,17 @@ export default function Settings() {
     }
   };
 
+  const confirmBranchAction = async () => {
+    const pending = branchConfirm;
+    if (!pending) return;
+    setBranchConfirm(null);
+    if (pending.action === 'delete') {
+      await deleteBranch(pending.id, pending.name);
+      return;
+    }
+    await updateBranch(pending.id, { is_active: false });
+  };
+
   const saveBranchPaymentModes = async (branchId: number) => {
     const modes = branchPaymentDraft[branchId] || {};
     try {
@@ -558,8 +570,6 @@ export default function Settings() {
   };
 
   const deleteBranch = async (id: number, name: string) => {
-    if (!window.confirm(`Delete the branch "${name}"? This cannot be undone.`)) return;
-
     try {
       setSavingBranch(true);
       await axios.delete(`${API_BASE_URL}/branches/${id}`, {
@@ -1482,7 +1492,9 @@ Don't miss out! ✨`;
                           title={branch.is_active
                             ? 'Deactivate: new orders will not be assigned to this branch. Existing orders and their history are unaffected.'
                             : 'Activate this branch so staff can create orders under it.'}
-                          onClick={() => updateBranch(branch.id, { is_active: !branch.is_active })}
+                          onClick={() => branch.is_active
+                            ? setBranchConfirm({ id: branch.id, name: branch.name, action: 'deactivate' })
+                            : updateBranch(branch.id, { is_active: true })}
                         >
                           {branch.is_active ? 'Deactivate' : 'Activate'}
                         </Button>
@@ -1491,7 +1503,7 @@ Don't miss out! ✨`;
                             variant="destructive"
                             size="sm"
                             disabled={savingBranch}
-                            onClick={() => deleteBranch(branch.id, branch.name)}
+                            onClick={() => setBranchConfirm({ id: branch.id, name: branch.name, action: 'delete' })}
                           >
                             Delete
                           </Button>
@@ -3097,6 +3109,37 @@ Don't miss out! ✨`;
         </div>
         )}
       </div>
+
+      <Dialog open={branchConfirm !== null} onOpenChange={(open) => { if (!open && !savingBranch) setBranchConfirm(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className={`h-5 w-5 ${branchConfirm?.action === 'delete' ? 'text-destructive' : 'text-amber-500'}`} />
+              {branchConfirm?.action === 'delete' ? 'Delete branch?' : 'Deactivate branch?'}
+            </DialogTitle>
+            <DialogDescription>
+              {branchConfirm?.action === 'delete'
+                ? <>You are asking to permanently delete <strong>{branchConfirm.name}</strong>.</>
+                : <>You are asking to deactivate <strong>{branchConfirm?.name}</strong>.</>}
+            </DialogDescription>
+          </DialogHeader>
+          <Alert variant={branchConfirm?.action === 'delete' ? 'destructive' : 'default'}>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>{branchConfirm?.action === 'delete' ? 'History is protected' : 'Existing records stay available'}</AlertTitle>
+            <AlertDescription>
+              {branchConfirm?.action === 'delete'
+                ? 'A branch with orders or assigned staff cannot be permanently deleted. The server will deactivate it instead, keeping order history tied to the original branch.'
+                : 'New orders will no longer use this branch. Existing orders and reports keep their branch history. Reassign staff separately if they should work from another branch.'}
+            </AlertDescription>
+          </Alert>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBranchConfirm(null)} disabled={savingBranch}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmBranchAction} disabled={savingBranch}>
+              {savingBranch ? 'Working?' : branchConfirm?.action === 'delete' ? 'Confirm delete' : 'Confirm deactivation'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Orders Dialog - Admin Only */}
       {isAdmin && (
