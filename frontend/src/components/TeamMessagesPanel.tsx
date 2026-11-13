@@ -10,7 +10,6 @@ type Contact = {
   full_name: string;
   role: string;
   branch_name?: string | null;
-  last_login?: string | null;
   unread_count: number;
   last_message?: string | null;
 };
@@ -29,9 +28,6 @@ type ChatMessage = {
   unsent_at?: string | null;
 };
 const timeLabel = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
-const loginLabel = (value?: string | null) => value
-  ? 'Last login ' + new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-  : 'Has not signed in yet';
 
 export default function TeamMessagesPanel({ operationsWorkspace = false }: { operationsWorkspace?: boolean }) {
   const { user } = useAuth();
@@ -53,12 +49,12 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
 
   const loadContacts = useCallback(async () => {
     try {
-      const response = await api.get('/operations/contacts');
+      const response = await api.get('/operations/contacts' + (operationsWorkspace ? '?workspace=operations' : ''));
       setContacts(response.data.contacts || []);
     } catch (e: any) {
       setError(e.response?.data?.error || 'Unable to load staff contacts');
     }
-  }, []);
+  }, [operationsWorkspace]);
 
   const loadConversation = useCallback(async () => {
     if (!peerId) {
@@ -68,7 +64,7 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
       return;
     }
     try {
-      const response = await api.get('/operations/conversations/' + peerId);
+      const response = await api.get('/operations/conversations/' + peerId + (operationsWorkspace ? '?workspace=operations' : ''));
       const incoming: ChatMessage[] = response.data.messages || [];
       setMessages((current) => {
         if (conversationPeerId !== peerId) return incoming;
@@ -81,7 +77,7 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
     } catch (e: any) {
       setError(e.response?.data?.error || 'Unable to load this conversation');
     }
-  }, [peerId, loadContacts, conversationPeerId]);
+  }, [peerId, loadContacts, conversationPeerId, operationsWorkspace]);
 
   useEffect(() => {
     void loadContacts();
@@ -124,7 +120,7 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
     if (!peerId || !messages.length || loadingOlder) return;
     setLoadingOlder(true);
     try {
-      const response = await api.get('/operations/conversations/' + peerId + '?before=' + messages[0].id);
+      const response = await api.get('/operations/conversations/' + peerId + '?before=' + messages[0].id + (operationsWorkspace ? '&workspace=operations' : ''));
       const older: ChatMessage[] = response.data.messages || [];
       setMessages((current) => {
         const byId = new Map([...older, ...current].map((message) => [message.id, message]));
@@ -214,8 +210,7 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
                   <b className="truncate text-sm">{contact.full_name}</b>
                   {contact.unread_count > 0 && <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">{contact.unread_count}</span>}
                 </span>
-                <small className="block truncate text-muted-foreground">{contact.role.replace('_', ' ')}{contact.branch_name ? ' · ' + contact.branch_name : ''}</small>
-                <small className="block truncate text-muted-foreground">{loginLabel(contact.last_login)}</small>
+                {contact.branch_name && <small className="block truncate text-muted-foreground">{contact.branch_name}</small>}
                 {contact.last_message && <small className="block truncate text-muted-foreground">{contact.last_message}</small>}
               </span>
             </button>
@@ -226,7 +221,7 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
       <section className="flex min-h-[500px] min-w-0 flex-col">
         <header className="border-b p-4">
           <h3 className="font-semibold">{peer?.full_name || 'Choose a staff member'}</h3>
-          <p className="text-xs text-muted-foreground">{peer ? [peer.role.replace('_', ' '), peer.branch_name, loginLabel(peer.last_login)].filter(Boolean).join(' · ') : 'Operations and desktop team conversations'}</p>
+          <p className="text-xs text-muted-foreground">{peer?.branch_name || (!peer ? 'Operations and desktop team conversations' : '')}</p>
         </header>
         {error && <p role="alert" className="m-3 rounded-lg border border-red-300 bg-red-50 p-2 text-sm text-red-800">{error}</p>}
         <div key={mergeKey} className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -238,7 +233,7 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
             return (
               <div key={message.id} className={'max-w-[88%] rounded-2xl px-3 py-2 ' + (ownMessage ? 'ml-auto bg-primary text-primary-foreground' : 'bg-muted')}>
                 <div className="mb-1 flex items-center justify-between gap-4"><b className="text-xs">{ownMessage && operationsWorkspace ? 'You (Operations)' : displayName}</b><time className="text-[10px] opacity-70">{timeLabel(message.created_at)}</time></div>
-                {!ownMessage && <small className="mb-1 block text-[10px] opacity-70">{message.sender_role.replace('_', ' ')}{message.sender_branch_name ? ' | ' + message.sender_branch_name : ''}</small>}
+                {!ownMessage && message.sender_branch_name && <small className="mb-1 block text-[10px] opacity-70">{message.sender_branch_name}</small>}
                 {editingMessageId === message.id ? (
                   <div className="space-y-2">
                     <textarea value={editDraft} onChange={(event) => setEditDraft(event.target.value)} maxLength={2000} rows={3} className="w-full rounded-lg border bg-background p-2 text-sm text-foreground" />

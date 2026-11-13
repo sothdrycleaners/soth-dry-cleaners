@@ -62,7 +62,7 @@ export function MainLayout({ children, title, subtitle, demoMode = false, operat
     if (isMobile) {
       setSidebarOpen(false);
     }
-  }, [location.pathname, isMobile]);
+  }, [location.pathname, location.search, isMobile]);
 
   useEffect(() => {
     if (demoMode || operationsMode) {

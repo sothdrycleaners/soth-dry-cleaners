@@ -39,7 +39,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Search, Eye, Calendar, User, Phone, Package, CreditCard, AlertCircle, CheckCircle2, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Truck, MapPin, MessageCircle, Printer, FileText, Settings2, Share2, Download, Mail, Trash2, ExternalLink, Bell, MessageSquare, StickyNote, X, ShieldAlert, Loader2 } from 'lucide-react';
+import { Search, Eye, Calendar, User, Phone, Package, CreditCard, AlertCircle, CheckCircle2, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Truck, MapPin, MessageCircle, Printer, FileText, Settings2, Share2, Download, Mail, Trash2, ExternalLink, Bell, MessageSquare, StickyNote, X, ShieldAlert, Loader2, FileSpreadsheet } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -616,6 +616,11 @@ export default function Orders() {
   const [paymentFilter, setPaymentFilter] = useState('ALL');
   const [backdatedFilter, setBackdatedFilter] = useState(false);
   const [branchFilter, setBranchFilter] = useState('ALL');
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportPeriod, setExportPeriod] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
+  const [exportFromDate, setExportFromDate] = useState('');
+  const [exportToDate, setExportToDate] = useState('');
+  const [exportingOrders, setExportingOrders] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -819,6 +824,65 @@ export default function Orders() {
     }
   }, [token, toast, currentPage, searchQuery, statusFilter, paymentFilter, backdatedFilter, branchFilter]);
 
+  const handleExportOrders = async () => {
+    const today = kampalaTodayYmd();
+    let fromDate = '';
+    let toDate = '';
+    if (exportPeriod === 'today') {
+      fromDate = today;
+      toDate = today;
+    } else if (exportPeriod === 'week') {
+      const monday = new Date(`${today}T00:00:00Z`);
+      monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+      fromDate = monday.toISOString().slice(0, 10);
+      toDate = today;
+    } else if (exportPeriod === 'month') {
+      fromDate = `${today.slice(0, 7)}-01`;
+      toDate = today;
+    } else if (exportPeriod === 'custom') {
+      fromDate = exportFromDate;
+      toDate = exportToDate;
+      if (!fromDate || !toDate) {
+        toast({ variant: 'destructive', title: 'Choose date range', description: 'Select both the start and end dates for a custom export.' });
+        return;
+      }
+      if (fromDate > toDate) {
+        toast({ variant: 'destructive', title: 'Invalid date range', description: 'The start date must be on or before the end date.' });
+        return;
+      }
+    }
+    setExportingOrders(true);
+    try {
+      const params: Record<string, string> = {};
+      if (fromDate) params.from_date = fromDate;
+      if (toDate) params.to_date = toDate;
+      if (statusFilter !== 'ALL') params.status = statusFilter;
+      if (paymentFilter !== 'ALL') params.payment_status = paymentFilter;
+      if (branchFilter !== 'ALL') params.branch_id = branchFilter;
+      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (backdatedFilter) params.historical = '1';
+      const response = await axios.get(`${API_BASE_URL}/orders/export.xlsx`, {
+        headers: { Authorization: `Bearer ${token}` }, params, responseType: 'blob',
+      });
+      const blobUrl = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `soth-orders-${fromDate || 'all-time'}${toDate ? `-to-${toDate}` : ''}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      setShowExportDialog(false);
+      toast({ title: 'Excel export downloaded', description: 'The workbook includes Orders, Order Items, and Customers sheets.' });
+    } catch (error) {
+      console.error('Could not export orders:', error);
+      toast({ variant: 'destructive', title: 'Export failed', description: 'Unable to export orders. Try a shorter date range or contact an administrator.' });
+    } finally {
+      setExportingOrders(false);
+    }
+  };
+
+
   useEffect(() => {
     if (!token) return;
     axios
@@ -924,8 +988,9 @@ export default function Orders() {
       ? branchList.find((b) => b.id === order.branch_id)
       : null;
     const branchModes = orderBranch?.payment_modes;
-    const effectivePaymentModes: PaymentModeDetails = branchModes
-      ? { ...DEFAULT_PAYMENT_MODES, ...branchModes }
+    const hasBranchPaymentModes = Object.values(branchModes || {}).some((value) => String(value || '').trim());
+    const effectivePaymentModes: PaymentModeDetails = hasBranchPaymentModes
+      ? { ...paymentModes, ...branchModes }
       : paymentModes;
 
     switch (kind) {
@@ -1669,6 +1734,11 @@ export default function Orders() {
           }}
         >
           {backdatedFilter ? 'Showing historical orders' : 'Historical orders'}
+        </Button>
+
+        <Button variant="outline" className="w-full sm:w-auto" onClick={() => setShowExportDialog(true)}>
+          <FileSpreadsheet className="mr-2 h-4 w-4" />
+          Export Excel
         </Button>
 
         {/* Column Visibility Menu */}
@@ -3795,6 +3865,44 @@ export default function Orders() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Export orders to Excel</DialogTitle>
+            <DialogDescription>
+              Download a workbook with order summaries, item-by-item details, and customers included in the export. Current status, payment, branch, and search filters will be applied.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="orders-export-period">Date range</Label>
+              <Select value={exportPeriod} onValueChange={(value: 'all' | 'today' | 'week' | 'month' | 'custom') => setExportPeriod(value)}>
+                <SelectTrigger id="orders-export-period"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All time</SelectItem>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="week">This week</SelectItem>
+                  <SelectItem value="month">This month</SelectItem>
+                  <SelectItem value="custom">Custom dates</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {exportPeriod === 'custom' && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-2"><Label htmlFor="orders-export-from">From</Label><Input id="orders-export-from" type="date" value={exportFromDate} onChange={(event) => setExportFromDate(event.target.value)} /></div>
+                <div className="space-y-2"><Label htmlFor="orders-export-to">To</Label><Input id="orders-export-to" type="date" value={exportToDate} onChange={(event) => setExportToDate(event.target.value)} /></div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowExportDialog(false)} disabled={exportingOrders}>Cancel</Button>
+            <Button type="button" onClick={() => void handleExportOrders()} disabled={exportingOrders}>
+              {exportingOrders ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preparing workbook...</> : <><FileSpreadsheet className="mr-2 h-4 w-4" />Download .xlsx</>}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

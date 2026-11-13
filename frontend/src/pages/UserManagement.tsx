@@ -965,26 +965,32 @@ const UserManagement = () => {
                           </TableCell>
                           {multiBranch && (
                             <TableCell>
-                              <Select
-                                value={user.branch_id ? String(user.branch_id) : 'none'}
-                                onValueChange={(value) => handleUpdateBranch(user, value)}
-                                disabled={updatingBranchUserId === user.id || (isManager && !isAdmin && user.role !== 'DESKTOP_AGENT')}
-                              >
-                                <SelectTrigger className="h-8 w-[150px]">
-                                  <SelectValue placeholder="Unassigned" />
-                                  {updatingBranchUserId === user.id && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">Unassigned</SelectItem>
-                                  {branchOptions.map((branch) => (
-                                    <SelectItem key={branch.id} value={String(branch.id)}>
-                                      {branch.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {updatingBranchUserId === user.id && (
-                                <span className="mt-1 block text-xs text-muted-foreground">Assigning branch…</span>
+                              {user.role === 'ADMIN' ? (
+                                <span className="text-sm text-muted-foreground">Unassigned</span>
+                              ) : (
+                                <>
+                                  <Select
+                                    value={user.branch_id ? String(user.branch_id) : 'none'}
+                                    onValueChange={(value) => handleUpdateBranch(user, value)}
+                                    disabled={updatingBranchUserId === user.id || (isManager && !isAdmin && user.role !== 'DESKTOP_AGENT')}
+                                  >
+                                    <SelectTrigger className="h-8 w-[150px]">
+                                      <SelectValue placeholder="Unassigned" />
+                                      {updatingBranchUserId === user.id && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="none">Unassigned</SelectItem>
+                                      {branchOptions.map((branch) => (
+                                        <SelectItem key={branch.id} value={String(branch.id)}>
+                                          {branch.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  {updatingBranchUserId === user.id && (
+                                    <span className="mt-1 block text-xs text-muted-foreground">Assigning branch...</span>
+                                  )}
+                                </>
                               )}
                             </TableCell>
                           )}

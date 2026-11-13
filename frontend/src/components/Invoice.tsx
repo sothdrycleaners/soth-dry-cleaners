@@ -4,6 +4,8 @@ import { formatUGX } from '@/lib/currency';
 import { COLLECTION_GRACE_DAYS, UNCOLLECTED_DONATION_MONTHS } from '@/lib/whatsapp';
 import axios from 'axios';
 import QRCode from 'qrcode';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Button } from '@/components/ui/button';
 import { Printer, Download } from 'lucide-react';
 
@@ -11,6 +13,9 @@ interface InvoiceProps {
   orderId: number;
   token: string;
   onClose?: () => void;
+  autoDownload?: boolean;
+  onAutoDownloadComplete?: () => void;
+  onAutoDownloadError?: () => void;
 }
 
 interface BusinessSettings {
@@ -56,6 +61,7 @@ interface OrderDetails {
 
 interface OrderItem {
   item_name: string;
+  service_type?: string;
   quantity: number;
   unit_price: number;
   total_price?: number;
@@ -64,13 +70,14 @@ interface OrderItem {
   surcharge_amount?: number;
 }
 
-export default function Invoice({ orderId, token, onClose }: InvoiceProps) {
+export default function Invoice({ orderId, token, onClose, autoDownload = false, onAutoDownloadComplete, onAutoDownloadError }: InvoiceProps) {
   const [order, setOrder] = useState<OrderDetails | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const invoiceRef = useRef<HTMLDivElement>(null);
+  const autoDownloadStartedRef = useRef(false);
 
   const loadInvoiceData = useCallback(async () => {
     try {
@@ -135,10 +142,11 @@ export default function Invoice({ orderId, token, onClose }: InvoiceProps) {
       setQrCodeUrl(qr);
     } catch (error) {
       console.error('Failed to load invoice data:', error);
+      if (autoDownload) onAutoDownloadError?.();
     } finally {
       setLoading(false);
     }
-  }, [orderId, token]);
+  }, [orderId, token, autoDownload, onAutoDownloadError]);
 
   useEffect(() => {
     loadInvoiceData();
@@ -148,30 +156,103 @@ export default function Invoice({ orderId, token, onClose }: InvoiceProps) {
     window.print();
   };
 
-  const handleDownload = () => {
-    if (!order) return;
-    
-    const printWindow = window.open('', '_blank');
-    if (printWindow && invoiceRef.current) {
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Invoice ${order.invoice_number}</title>
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body { font-family: 'Courier New', monospace; padding: 20px; }
-              ${getInvoiceStyles()}
-            </style>
-          </head>
-          <body>
-            ${invoiceRef.current.innerHTML}
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
+  const handleDownload = useCallback(() => {
+    if (!order || !settings) return;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(19);
+    doc.text(settings.business_name.toUpperCase(), pageWidth / 2, 18, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const contactLine = [settings.business_address, settings.business_location, settings.business_phone, settings.business_email].filter(Boolean).join(' | ');
+    if (contactLine) doc.text(contactLine, pageWidth / 2, 25, { align: 'center', maxWidth: pageWidth - 24 });
+    if (order.branch_name) doc.text(`Branch: ${order.branch_name}`, pageWidth / 2, 30, { align: 'center' });
+    doc.setDrawColor(21, 59, 100);
+    doc.line(12, 34, pageWidth - 12, 34);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('INVOICE', 12, 43);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`Invoice: ${order.invoice_number || order.order_number}`, 12, 50);
+    doc.text(`Order: ${order.order_number}`, 12, 56);
+    doc.text(`Date: ${new Date(order.created_at).toLocaleString('en-GB')}`, 12, 62);
+    doc.text(`Status: ${order.order_status || 'Processing'}`, 12, 68);
+    doc.text(`Customer: ${order.customer_name}`, pageWidth / 2, 50);
+    doc.text(`Phone: ${order.customer_phone || '-'}`, pageWidth / 2, 56);
+    if (order.customer_email) doc.text(`Email: ${order.customer_email}`, pageWidth / 2, 62);
+    doc.text(`Recorded by: ${order.staff_name || '-'}`, pageWidth / 2, 68);
+
+    autoTable(doc, {
+      startY: 76,
+      head: [['Item', 'Service', 'Qty', 'Unit price', 'Discount', 'Surcharge', 'Line total']],
+      body: orderItems.map((item) => [
+        item.item_name,
+        (item.service_type || 'SERVICE').replace(/_/g, ' '),
+        String(item.quantity),
+        formatUGX(Number(item.unit_price || 0)),
+        formatUGX(Number(item.discount_amount || 0)),
+        formatUGX(Number(item.surcharge_amount || 0)),
+        formatUGX(Number(item.total_price ?? item.subtotal ?? 0)),
+      ]),
+      styles: { fontSize: 8, cellPadding: 2.3, overflow: 'linebreak' },
+      headStyles: { fillColor: [21, 59, 100], textColor: 255 },
+      columnStyles: { 0: { cellWidth: 42 }, 1: { cellWidth: 25 } },
+      margin: { left: 12, right: 12 },
+    });
+    let y = ((doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 80) + 8;
+    if (y > 255) { doc.addPage(); y = 18; }
+    const labelX = pageWidth - 72;
+    const valueX = pageWidth - 12;
+    doc.setFontSize(9);
+    doc.text('Subtotal', labelX, y); doc.text(formatUGX(Number(order.subtotal || 0)), valueX, y, { align: 'right' }); y += 6;
+    const discounts = Number(order.discount_amount || 0) + Number(order.bargain_amount || 0) + orderItems.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0);
+    if (discounts > 0) { doc.text('Discounts', labelX, y); doc.text(`-${formatUGX(discounts)}`, valueX, y, { align: 'right' }); y += 6; }
+    const surcharges = Number(order.surcharge_amount || 0) + orderItems.reduce((sum, item) => sum + Number(item.surcharge_amount || 0), 0);
+    if (surcharges > 0) { doc.text('Additional services', labelX, y); doc.text(formatUGX(surcharges), valueX, y, { align: 'right' }); y += 6; }
+    if (settings.ura_compliance_enabled && Number(order.tax_amount) > 0) { doc.text(`VAT (${order.tax_rate}%)`, labelX, y); doc.text(formatUGX(Number(order.tax_amount)), valueX, y, { align: 'right' }); y += 6; }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('TOTAL', labelX, y + 1); doc.text(formatUGX(Number(order.total_amount)), valueX, y + 1, { align: 'right' });
+    y += 9;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    doc.text(`Payment: ${(order.payment_method || '').replace(/_/g, ' ')} (${order.payment_status})`, 12, y);
+    doc.text(`Paid: ${formatUGX(Number(order.amount_paid))}`, 12, y + 6);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Balance due: ${formatUGX(Number(order.balance))}`, 12, y + 12);
+    y += 21;
+    if (settings.ura_compliance_enabled) {
+      doc.setFont('helvetica', 'normal');
+      doc.text(`TIN: ${settings.business_tin || 'Not configured'}    Fiscal device: ${settings.fiscal_device_number || 'Not configured'}`, 12, y, { maxWidth: pageWidth - 24 });
+      y += 7;
     }
-  };
+    if (qrCodeUrl) {
+      if (y > 245) { doc.addPage(); y = 18; }
+      doc.addImage(qrCodeUrl, 'PNG', pageWidth - 38, y, 24, 24);
+    }
+    doc.setFontSize(8);
+    doc.text(settings.invoice_footer_text || 'Thank you for your business!', 12, Math.min(y + 8, 275), { maxWidth: pageWidth - 55 });
+    const fileId = String(order.invoice_number || order.order_number).replace(/[^A-Za-z0-9_-]+/g, '-');
+    doc.save(`Soth-Invoice-${fileId}.pdf`);
+  }, [order, settings, orderItems, qrCodeUrl]);
+
+  useEffect(() => {
+    autoDownloadStartedRef.current = false;
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!autoDownload || loading || !order || !settings || autoDownloadStartedRef.current) return;
+    autoDownloadStartedRef.current = true;
+    try {
+      handleDownload();
+      onAutoDownloadComplete?.();
+    } catch (error) {
+      console.error('Invoice PDF download failed:', error);
+      onAutoDownloadError?.();
+    }
+  }, [autoDownload, loading, order, settings, handleDownload, onAutoDownloadComplete, onAutoDownloadError]);
 
   const getInvoiceStyles = () => `
     .invoice-container { max-width: 800px; margin: 0 auto; border: 2px solid #000; padding: 20px; }

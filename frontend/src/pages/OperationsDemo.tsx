@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import './OperationsDemo.css';
+import OperationsLive from './OperationsLive';
 
 const localDateKey = (date = new Date()) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
@@ -180,7 +181,7 @@ const demoDeliveredOrders: DeliveredOrderRecord[] = Array.from({ length: 24 }, (
   };
 });
 
-const OperationsDemo = () => {
+const OperationsDemoPreview = () => {
   const navigate = useNavigate();
   const { isAuthenticated, canAccessOperations, canAccessDesktopWorkspace } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -731,4 +732,8 @@ function statusLabel(status: ItemStatus) {
   return status === 'RECEIVED' ? 'Received' : status === 'PROCESSING' ? 'Processing' : 'Ready';
 }
 
-export default OperationsDemo;
+export default function OperationsDemo() {
+ const { isAuthenticated, canAccessOperations } = useAuth();
+ if (isAuthenticated && !canAccessOperations) return <Navigate to="/dashboard" replace />;
+ return isAuthenticated ? <OperationsLive /> : <OperationsDemoPreview />;
+}

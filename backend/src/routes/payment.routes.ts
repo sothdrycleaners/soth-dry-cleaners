@@ -116,6 +116,7 @@ router.post(
 );
 
 // Export payments to CSV (Admin only)
+router.get('/export/xlsx', requireAdmin as any, paymentController.exportPaymentsXLSX as any);
 router.get('/export/csv', requireAdmin as any, paymentController.exportPayments as any);
 
 // Export payments to PDF (Admin only)

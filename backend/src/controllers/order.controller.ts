@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { validationResult } from 'express-validator';
 import { query, getClient, beginTenantTransaction } from '../config/database';
+import { isSystemAdminEmail } from '../utils/systemAdmin';
 import { AuthRequest } from '../middleware/auth';
 import { OrderStatus } from '../models/Order';
 import { sendOrderDeliveredNotification, sendOrderReadyNotification, sendOrderReceipt } from '../services/sms.service';
@@ -13,6 +14,7 @@ import { resolveListBranchId, forbiddenIfOutsideBranch } from '../utils/branchSc
 import { notifyAdministrators } from './notifications.controller';
 import { calendarDateToTimestamp, extractYmd, kampalaTodayYmd, toKampalaYmd, ymdToPgTimestamp } from '../utils/businessDate';
 import fs from 'fs';
+import ExcelJS from 'exceljs';
 
 type SettingsQuerier = { query: (text: string) => Promise<any> };
 
@@ -155,6 +157,7 @@ export const getAllOrders = async (req: AuthRequest, res: Response) => {
         c.phone as customer_phone,
         u.full_name as staff_name,
         u.role as user_role,
+        u.email as staff_email,
         u.status as staff_status,
         o.branch_id,
         b.name as branch_name,
@@ -170,8 +173,13 @@ export const getAllOrders = async (req: AuthRequest, res: Response) => {
     
     const result = await query(sql, values);
     
-    res.json({ 
-      orders: result.rows,
+    const orders = result.rows.map(({ staff_email, ...order }: any) => ({
+      ...order,
+      user_role: isSystemAdminEmail(staff_email) ? null : order.user_role,
+    }));
+
+    res.json({
+      orders,
       total,
       page: Number(page),
       limit: Number(limit),
@@ -180,6 +188,176 @@ export const getAllOrders = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Get orders error:', error);
     res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+};
+
+export const exportOrdersXlsx = async (req: AuthRequest, res: Response) => {
+  try {
+    const { from_date, to_date, branch_id, status, payment_status, search, historical } = req.query;
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const fromDate = from_date ? String(from_date) : '';
+    const toDate = to_date ? String(to_date) : '';
+    if ((fromDate && !datePattern.test(fromDate)) || (toDate && !datePattern.test(toDate))) {
+      return res.status(400).json({ error: 'Use valid YYYY-MM-DD dates for the export range.' });
+    }
+    if (fromDate && toDate && fromDate > toDate) {
+      return res.status(400).json({ error: 'The start date must be on or before the end date.' });
+    }
+
+    const conditions = ['o.tenant_id = app_current_tenant_id()'];
+    const values: any[] = [];
+    const add = (value: any) => { values.push(value); return `$${values.length}`; };
+    if (req.user?.role !== 'ADMIN') conditions.push("o.status <> 'cancelled'");
+    if (['true', '1', 'yes'].includes(String(historical || '').toLowerCase())) conditions.push('COALESCE(o.is_backdated, FALSE) = TRUE');
+    if (status && status !== 'ALL') conditions.push(`o.status = ${add(status)}`);
+    if (payment_status && payment_status !== 'ALL') conditions.push(`o.payment_status = ${add(payment_status)}`);
+    if (fromDate) conditions.push(`o.created_at >= ${add(fromDate)}::date`);
+    if (toDate) conditions.push(`o.created_at < (${add(toDate)}::date + INTERVAL '1 day')`);
+    const branchId = resolveListBranchId(req, branch_id);
+    if (branchId !== null) conditions.push(`o.branch_id = ${add(branchId)}`);
+    if (search && String(search).trim()) {
+      const term = add(`%${String(search).trim()}%`);
+      conditions.push(`(o.order_number ILIKE ${term} OR c.name ILIKE ${term} OR c.phone ILIKE ${term} OR c.customer_id ILIKE ${term})`);
+    }
+    const where = conditions.join(' AND ');
+
+    const ordersResult = await query(
+      `SELECT o.id,o.order_number,o.invoice_number,o.created_at,o.due_date,o.pickup_date,
+              o.status::text AS order_status,o.payment_status::text AS payment_status,
+              o.payment_method,o.subtotal,o.discount_percentage,o.discount_amount,o.bargain_amount,
+              COALESCE(o.surcharge_amount,0) AS surcharge_amount,o.tax_rate,o.tax_amount,
+              o.total_amount,o.amount_paid,o.balance,o.transaction_reference,o.notes,
+              o.catalogue_kg,c.customer_id,c.name AS customer_name,c.phone AS customer_phone,
+              c.email AS customer_email,c.location AS customer_location,u.full_name AS recorded_by,
+              b.name AS branch_name
+       FROM public.orders o
+       JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
+       JOIN public.users u ON u.id=o.user_id AND u.tenant_id=o.tenant_id
+       LEFT JOIN public.branches b ON b.id=o.branch_id AND b.tenant_id=o.tenant_id
+       WHERE ${where}
+       ORDER BY o.created_at DESC,o.id DESC`,
+      values
+    );
+    const orderIds = ordersResult.rows.map((row: any) => Number(row.id));
+    let itemRows: any[] = [];
+    if (orderIds.length) {
+      const itemResult = await query(
+        `SELECT oi.order_id,o.order_number,o.invoice_number,o.created_at,b.name AS branch_name,
+                c.customer_id,c.name AS customer_name,c.phone AS customer_phone,
+                p.item_id,p.name AS item_name,p.category,oi.service_type,oi.quantity,oi.unit_price,
+                oi.discount_amount,oi.surcharge_amount,oi.total_price,oi.notes
+         FROM public.order_items oi
+         JOIN public.orders o ON o.id=oi.order_id AND o.tenant_id=app_current_tenant_id()
+         JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
+         LEFT JOIN public.branches b ON b.id=o.branch_id AND b.tenant_id=o.tenant_id
+         LEFT JOIN public.price_items p ON p.id=oi.price_item_id AND p.tenant_id=o.tenant_id
+         WHERE oi.order_id=ANY($1::int[])
+         ORDER BY o.created_at DESC,o.id DESC,oi.id ASC`,
+        [orderIds]
+      );
+      itemRows = itemResult.rows;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Soth Dry Cleaners';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+    const headerStyle = (sheet: ExcelJS.Worksheet) => {
+      const header = sheet.getRow(1);
+      header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF153B64' } };
+      header.alignment = { vertical: 'middle', wrapText: true };
+      header.height = 30;
+      sheet.views = [{ state: 'frozen', ySplit: 1 }];
+      const columnLetter = (columnNumber: number) => {
+        let number = columnNumber;
+        let letters = '';
+        while (number > 0) {
+          const remainder = (number - 1) % 26;
+          letters = String.fromCharCode(65 + remainder) + letters;
+          number = Math.floor((number - 1) / 26);
+        }
+        return letters;
+      };
+      sheet.autoFilter = { from: 'A1', to: `${columnLetter(sheet.columnCount)}1` };
+    };
+    const ordersSheet = workbook.addWorksheet('Orders');
+    ordersSheet.columns = [
+      { header: 'Order ID', key: 'id', width: 12 }, { header: 'Order Number', key: 'order_number', width: 20 },
+      { header: 'Invoice Number', key: 'invoice_number', width: 20 }, { header: 'Order Date', key: 'created_at', width: 22 },
+      { header: 'Branch', key: 'branch_name', width: 22 }, { header: 'Customer ID', key: 'customer_id', width: 18 },
+      { header: 'Customer', key: 'customer_name', width: 28 }, { header: 'Phone', key: 'customer_phone', width: 18 },
+      { header: 'Email', key: 'customer_email', width: 30 }, { header: 'Location', key: 'customer_location', width: 24 },
+      { header: 'Recorded By', key: 'recorded_by', width: 24 }, { header: 'Order Status', key: 'order_status', width: 16 },
+      { header: 'Payment Status', key: 'payment_status', width: 17 }, { header: 'Payment Method', key: 'payment_method', width: 20 },
+      { header: 'Subtotal (UGX)', key: 'subtotal', width: 18 }, { header: 'Order Discount %', key: 'discount_percentage', width: 18 },
+      { header: 'Order Discount (UGX)', key: 'discount_amount', width: 22 }, { header: 'Bargain (UGX)', key: 'bargain_amount', width: 18 },
+      { header: 'Surcharge (UGX)', key: 'surcharge_amount', width: 18 }, { header: 'VAT %', key: 'tax_rate', width: 12 },
+      { header: 'VAT (UGX)', key: 'tax_amount', width: 16 }, { header: 'Total (UGX)', key: 'total_amount', width: 18 },
+      { header: 'Amount Paid (UGX)', key: 'amount_paid', width: 20 }, { header: 'Balance (UGX)', key: 'balance', width: 18 },
+      { header: 'Due Date', key: 'due_date', width: 18 }, { header: 'Pickup Date', key: 'pickup_date', width: 18 },
+      { header: 'Transaction Reference', key: 'transaction_reference', width: 25 }, { header: 'Order Notes', key: 'notes', width: 38 },
+      { header: 'Bulk Laundry (kg)', key: 'catalogue_kg', width: 18 },
+    ];
+    ordersResult.rows.forEach((row: any) => ordersSheet.addRow(row));
+    headerStyle(ordersSheet);
+    ['subtotal','discount_amount','bargain_amount','surcharge_amount','tax_amount','total_amount','amount_paid','balance'].forEach((key) => {
+      ordersSheet.getColumn(key).numFmt = '#,##0;[Red]-#,##0';
+    });
+    ordersSheet.getColumn('created_at').numFmt = 'yyyy-mm-dd hh:mm';
+
+    const itemsSheet = workbook.addWorksheet('Order Items');
+    itemsSheet.columns = [
+      { header: 'Order Number', key: 'order_number', width: 20 }, { header: 'Invoice Number', key: 'invoice_number', width: 20 },
+      { header: 'Order Date', key: 'created_at', width: 22 }, { header: 'Branch', key: 'branch_name', width: 22 },
+      { header: 'Customer ID', key: 'customer_id', width: 18 }, { header: 'Customer', key: 'customer_name', width: 28 },
+      { header: 'Phone', key: 'customer_phone', width: 18 }, { header: 'Item ID', key: 'item_id', width: 16 },
+      { header: 'Item', key: 'item_name', width: 28 }, { header: 'Category', key: 'category', width: 18 },
+      { header: 'Service', key: 'service_type', width: 18 }, { header: 'Quantity', key: 'quantity', width: 12 },
+      { header: 'Unit Price (UGX)', key: 'unit_price', width: 18 }, { header: 'Discount (UGX)', key: 'discount_amount', width: 18 },
+      { header: 'Surcharge (UGX)', key: 'surcharge_amount', width: 18 }, { header: 'Line Total (UGX)', key: 'total_price', width: 18 },
+      { header: 'Item Notes', key: 'notes', width: 40 },
+    ];
+    itemRows.forEach((row: any) => itemsSheet.addRow(row));
+    headerStyle(itemsSheet);
+    ['unit_price','discount_amount','surcharge_amount','total_price'].forEach((key) => {
+      itemsSheet.getColumn(key).numFmt = '#,##0;[Red]-#,##0';
+    });
+    itemsSheet.getColumn('created_at').numFmt = 'yyyy-mm-dd hh:mm';
+
+    const customerMap = new Map<string, any>();
+    ordersResult.rows.forEach((row: any) => {
+      const key = String(row.customer_id);
+      const current = customerMap.get(key) || {
+        customer_id: row.customer_id, customer_name: row.customer_name, phone: row.customer_phone,
+        email: row.customer_email, location: row.customer_location, order_count: 0, total_spend: 0,
+      };
+      current.order_count += 1;
+      current.total_spend += Number(row.total_amount || 0);
+      customerMap.set(key, current);
+    });
+    const customersSheet = workbook.addWorksheet('Customers');
+    customersSheet.columns = [
+      { header: 'Customer ID', key: 'customer_id', width: 18 }, { header: 'Customer', key: 'customer_name', width: 28 },
+      { header: 'Phone', key: 'phone', width: 18 }, { header: 'Email', key: 'email', width: 30 },
+      { header: 'Location', key: 'location', width: 24 }, { header: 'Orders in Export', key: 'order_count', width: 18 },
+      { header: 'Total Orders (UGX)', key: 'total_spend', width: 22 },
+    ];
+    customerMap.forEach((row) => customersSheet.addRow(row));
+    headerStyle(customersSheet);
+    customersSheet.getColumn('total_spend').numFmt = '#,##0;[Red]-#,##0';
+
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const fromLabel = fromDate || 'all-time';
+    const toLabel = toDate ? `-to-${toDate}` : '';
+    const fileName = `soth-orders-${fromLabel}${toLabel}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buffer);
+  } catch (error) {
+    console.error('Export orders XLSX error:', error);
+    return res.status(500).json({ error: 'Unable to export orders. Please narrow the date range and try again.' });
   }
 };
 

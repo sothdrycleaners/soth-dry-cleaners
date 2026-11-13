@@ -1,4 +1,5 @@
 import { MainLayout } from '@/components/layout/MainLayout';
+import Invoice from '@/components/Invoice';
 import { API_BASE_URL } from '@/lib/api';
 import { formatUGX } from '@/lib/currency';
 import { kampalaTodayYmd } from '@/lib/businessDate';
@@ -288,6 +289,7 @@ export default function NewOrder() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const [invoiceDownloadOrderId, setInvoiceDownloadOrderId] = useState<number | null>(null);
   const creatingOrderRef = useRef(false);
   const orderRequestKeyRef = useRef<string | null>(null);
   /** Draft text while typing quantity (index → string) so keyboard entry works smoothly */
@@ -1046,6 +1048,7 @@ export default function NewOrder() {
       });
 
       const order = response.data.order;
+      if (order?.id) setInvoiceDownloadOrderId(Number(order.id));
       if (response.data.duplicate_request) {
         resetOrderForm();
         orderRequestKeyRef.current = null;
@@ -2306,6 +2309,23 @@ export default function NewOrder() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {invoiceDownloadOrderId && token && (
+        <div className="hidden" aria-hidden="true">
+          <Invoice
+            orderId={invoiceDownloadOrderId}
+            token={token}
+            autoDownload
+            onAutoDownloadComplete={() => {
+              setInvoiceDownloadOrderId(null);
+              toast({ title: 'Invoice downloaded', description: 'The invoice PDF was downloaded for the new order.' });
+            }}
+            onAutoDownloadError={() => {
+              setInvoiceDownloadOrderId(null);
+              toast({ variant: 'destructive', title: 'Invoice download failed', description: 'The order was saved. Open it in Orders and download the invoice again.' });
+            }}
+          />
+        </div>
+      )}
     </MainLayout>
   );
 }

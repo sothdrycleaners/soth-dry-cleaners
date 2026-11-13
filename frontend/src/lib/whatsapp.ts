@@ -288,9 +288,9 @@ function buildPaymentRequestLines(
   const modes = { ...DEFAULT_PAYMENT_MODES, ...(paymentModes || {}) };
   const lines = ['', '*HOW TO PAY*'];
 
-  if (modes.centenary_account) lines.push(`Centenary account No: ${modes.centenary_account}`);
-  if (modes.mtn_code) lines.push(`MTN code no: ${modes.mtn_code}`);
-  if (modes.airtel_merchant) lines.push(`Airtel merchant no: ${modes.airtel_merchant}`);
+  if (modes.centenary_account) lines.push(`Bank account number: ${modes.centenary_account}`);
+  if (modes.mtn_code) lines.push(`MTN MoMo Pay: ${modes.mtn_code}`);
+  if (modes.airtel_merchant) lines.push(`Airtel Pay: ${modes.airtel_merchant}`);
 
   lines.push(`Kindly clear the balance of ${formatUGX(order.balance)}.`);
   return lines;
@@ -347,9 +347,9 @@ function buildCompactPaymentLines(
     const modes = { ...DEFAULT_PAYMENT_MODES, ...(paymentModes || {}) };
     lines.push('');
     lines.push('*HOW TO PAY*');
-    if (modes.centenary_account) lines.push(`Bank (Centenary): ${modes.centenary_account}`);
-    if (modes.mtn_code)         lines.push(`MTN Mobile Money: ${modes.mtn_code}`);
-    if (modes.airtel_merchant)  lines.push(`Airtel Money: ${modes.airtel_merchant}`);
+    if (modes.centenary_account) lines.push(`Bank account number: ${modes.centenary_account}`);
+    if (modes.mtn_code)         lines.push(`MTN MoMo Pay: ${modes.mtn_code}`);
+    if (modes.airtel_merchant)  lines.push(`Airtel Pay: ${modes.airtel_merchant}`);
     lines.push('Kindly clear the balance before collection.');
   } else {
     lines.push('Payment confirmed: *Full payment received* ✓');

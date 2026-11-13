@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { query, getClient, beginTenantTransaction } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import PDFDocument from 'pdfkit';
+import ExcelJS from 'exceljs';
 import { createSystemNotification, notifyAdministrators } from './notifications.controller';
 import { forbiddenIfOutsideBranch, resolveListBranchId } from '../utils/branchScope';
 import { extractYmd, kampalaTodayYmd, ymdToPgTimestamp } from '../utils/businessDate';
@@ -650,6 +651,103 @@ export const exportPayments = async (req: AuthRequest, res: Response) => {
 /**
  * Export payments to PDF (Admin only)
  */
+export const exportPaymentsXLSX = async (req: AuthRequest, res: Response) => {
+  try {
+    const { from_date, to_date, payment_method, payment_status, search } = req.query;
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const fromDate = from_date ? String(from_date) : '';
+    const toDate = to_date ? String(to_date) : '';
+    if ((fromDate && !datePattern.test(fromDate)) || (toDate && !datePattern.test(toDate))) {
+      return res.status(400).json({ error: 'Use valid YYYY-MM-DD dates for the export range.' });
+    }
+    if (fromDate && toDate && fromDate > toDate) {
+      return res.status(400).json({ error: 'The start date must be on or before the end date.' });
+    }
+
+    const conditions = ['p.amount > 0'];
+    const values: any[] = [];
+    const add = (value: any) => { values.push(value); return `$${values.length}`; };
+    if (fromDate) conditions.push(`(p.payment_date AT TIME ZONE 'Africa/Kampala')::date >= ${add(fromDate)}::date`);
+    if (toDate) conditions.push(`(p.payment_date AT TIME ZONE 'Africa/Kampala')::date <= ${add(toDate)}::date`);
+    if (payment_method && payment_method !== 'ALL') {
+      if (payment_method === 'MOBILE_MONEY') conditions.push(`p.payment_method LIKE '%MOBILE_MONEY%'`);
+      else if (payment_method === 'MTN') conditions.push(`p.payment_method LIKE '%MTN%'`);
+      else if (payment_method === 'AIRTEL') conditions.push(`p.payment_method LIKE '%AIRTEL%'`);
+      else conditions.push(`p.payment_method = ${add(payment_method)}`);
+    }
+    if (payment_status && payment_status !== 'ALL' && payment_status !== 'UNPAID') {
+      if (payment_status === 'CANCELLED') conditions.push('p.is_cancelled = TRUE');
+      else {
+        conditions.push('(p.is_cancelled IS NULL OR p.is_cancelled = FALSE)');
+        conditions.push(`o.payment_status = ${add(payment_status)}`);
+      }
+    }
+    if (search && String(search).trim()) {
+      const term = add(`%${String(search).trim()}%`);
+      conditions.push(`(o.order_number ILIKE ${term} OR c.name ILIKE ${term} OR c.customer_id ILIKE ${term} OR c.phone ILIKE ${term} OR p.transaction_reference ILIKE ${term})`);
+    }
+    const result = await query(
+      `SELECT p.id,p.payment_date,o.order_number,o.invoice_number,c.customer_id,
+              c.name AS customer_name,c.phone AS customer_phone,c.email AS customer_email,
+              b.name AS branch_name,p.payment_method,p.transaction_reference,p.amount AS amount_paid,
+              o.payment_status,COALESCE(o.total_amount,o.total,0) AS order_total,
+              GREATEST(0,COALESCE(o.total_amount,o.total,0)-COALESCE(o.amount_paid,0)) AS order_balance,
+              u.full_name AS received_by,p.notes,p.is_cancelled,p.cancelled_at,p.cancellation_reason
+       FROM public.payments p
+       LEFT JOIN public.orders o ON p.order_id=o.id
+       LEFT JOIN public.customers c ON p.customer_id=c.id
+       LEFT JOIN public.branches b ON b.id=o.branch_id
+       LEFT JOIN public.users u ON p.created_by=u.id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY p.payment_date DESC NULLS LAST,p.id DESC`, values
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Soth Dry Cleaners';
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet('Payments');
+    sheet.columns = [
+      { header: 'Payment ID', key: 'id', width: 14 }, { header: 'Payment Date', key: 'payment_date', width: 22 },
+      { header: 'Order Number', key: 'order_number', width: 20 }, { header: 'Invoice Number', key: 'invoice_number', width: 20 },
+      { header: 'Branch', key: 'branch_name', width: 22 }, { header: 'Customer ID', key: 'customer_id', width: 18 },
+      { header: 'Customer', key: 'customer_name', width: 28 }, { header: 'Phone', key: 'customer_phone', width: 18 },
+      { header: 'Email', key: 'customer_email', width: 30 }, { header: 'Payment Method', key: 'payment_method', width: 22 },
+      { header: 'Transaction Reference', key: 'transaction_reference', width: 26 }, { header: 'Amount Paid (UGX)', key: 'amount_paid', width: 20 },
+      { header: 'Order Total (UGX)', key: 'order_total', width: 20 }, { header: 'Order Balance (UGX)', key: 'order_balance', width: 22 },
+      { header: 'Payment Status', key: 'payment_status', width: 18 }, { header: 'Received By', key: 'received_by', width: 24 },
+      { header: 'Cancelled', key: 'is_cancelled', width: 14 }, { header: 'Cancelled At', key: 'cancelled_at', width: 22 },
+      { header: 'Cancellation Reason', key: 'cancellation_reason', width: 34 }, { header: 'Notes', key: 'notes', width: 40 },
+    ];
+    result.rows.forEach((row: any) => sheet.addRow(row));
+    const header = sheet.getRow(1);
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF153B64' } };
+    header.alignment = { vertical: 'middle', wrapText: true };
+    header.height = 30;
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: 'A1', to: 'T1' };
+    ['amount_paid','order_total','order_balance'].forEach((key) => { sheet.getColumn(key).numFmt = '#,##0;[Red]-#,##0'; });
+    ['payment_date','cancelled_at'].forEach((key) => { sheet.getColumn(key).numFmt = 'yyyy-mm-dd hh:mm'; });
+    const lastPaymentRow = result.rows.length + 1;
+    const totalRow = sheet.addRow({ amount_paid: result.rows.length
+      ? { formula: `SUMIF(Q2:Q${lastPaymentRow},FALSE,L2:L${lastPaymentRow})` }
+      : 0 });
+    totalRow.getCell('amount_paid').numFmt = '#,##0;[Red]-#,##0';
+    totalRow.getCell('amount_paid').font = { bold: true };
+    totalRow.getCell('amount_paid').note = 'Total payments in this export';
+
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const filename = `soth-payments-${fromDate || 'all-time'}${toDate ? `-to-${toDate}` : ''}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buffer);
+  } catch (error) {
+    console.error('Export payments XLSX error:', error);
+    return res.status(500).json({ error: 'Failed to export payments to Excel' });
+  }
+};
+
 export const exportPaymentsPDF = async (req: AuthRequest, res: Response) => {
   try {
     const { from_date, to_date, payment_method } = req.query;

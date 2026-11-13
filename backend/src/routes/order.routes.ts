@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import * as orderController from '../controllers/order.controller';
 import { authenticate , requireDesktopWorkspaceAccess} from '../middleware/auth';
 import { orderValidation } from '../middleware/validation';
@@ -11,6 +11,7 @@ router.use(authenticate as any);
 router.use(requireDesktopWorkspaceAccess as any);
 
 // Stats and bulk operations must come before :id routes
+router.get('/export.xlsx', orderController.exportOrdersXlsx as any);
 router.get('/stats', orderController.getOrderStats as any);
 router.get('/deleted', requireAdmin as any, orderController.getDeletedOrders as any);
 router.post('/bulk-delete', requireAdmin as any, orderController.bulkDeleteOrders as any);

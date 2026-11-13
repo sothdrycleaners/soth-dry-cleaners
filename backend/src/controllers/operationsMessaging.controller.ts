@@ -3,18 +3,23 @@ import { AuthRequest } from '../middleware/auth';
 import { query } from '../config/database';
 
 const staffRoles = ['ADMIN', 'MANAGER', 'OPERATIONS', 'DESKTOP_AGENT'];
-function contactRoles(role: string) {
+function hasOperationsAccess(req: AuthRequest) {
+  return ['ADMIN', 'MANAGER', 'OPERATIONS'].includes(req.user!.role) ||
+    (req.user!.role === 'DESKTOP_AGENT' && !!req.user!.operations_access_enabled);
+}
+function contactRoles(role: string, operationsWorkspace = false) {
+  if (operationsWorkspace) return staffRoles;
   if (role === 'DESKTOP_AGENT') return ['ADMIN', 'MANAGER', 'OPERATIONS'];
-  if (role === 'OPERATIONS') return ['ADMIN', 'MANAGER', 'OPERATIONS', 'DESKTOP_AGENT'];
+  if (role === 'OPERATIONS') return staffRoles;
   if (role === 'ADMIN' || role === 'MANAGER') return staffRoles;
   return [];
 }
-async function getPeer(req: AuthRequest, peerId: number) {
+async function getPeer(req: AuthRequest, peerId: number, operationsWorkspace = false) {
   if (!Number.isSafeInteger(peerId) || peerId < 1 || peerId === req.user!.id) return null;
-  const roles = contactRoles(req.user!.role);
+  const roles = contactRoles(req.user!.role, operationsWorkspace && hasOperationsAccess(req));
   if (!roles.length) return null;
   const result = await query(
-    "SELECT u.id,u.full_name,u.role::text AS role,u.branch_id,u.last_login,b.name AS branch_name " +
+    "SELECT u.id,u.full_name,u.role::text AS role,u.branch_id,CASE WHEN u.role::text='ADMIN' THEN NULL ELSE b.name END AS branch_name " +
     "FROM public.users u LEFT JOIN public.branches b ON b.id=u.branch_id " +
     "WHERE u.id=$1 AND u.tenant_id=app_current_tenant_id() AND u.status='ACTIVE' AND u.role::text=ANY($2::text[])",
     [peerId, roles]
@@ -24,10 +29,12 @@ async function getPeer(req: AuthRequest, peerId: number) {
 
 export const getMessagingContacts = async (req: AuthRequest, res: Response) => {
   try {
-    const roles = contactRoles(req.user!.role);
+    const operationsWorkspace = req.query.workspace === 'operations';
+    if (operationsWorkspace && !hasOperationsAccess(req)) return res.status(403).json({ error: 'Operations access is not enabled' });
+    const roles = contactRoles(req.user!.role, operationsWorkspace);
     if (!roles.length) return res.status(403).json({ error: 'Staff messaging is not available for this account' });
     const result = await query(
-      "SELECT u.id,u.full_name,u.role::text AS role,u.branch_id,u.last_login,b.name AS branch_name," +
+      "SELECT u.id,u.full_name,u.role::text AS role,u.branch_id,CASE WHEN u.role::text='ADMIN' THEN NULL ELSE b.name END AS branch_name," +
       "(SELECT COUNT(1)::int FROM public.operations_messages unread WHERE unread.tenant_id=u.tenant_id AND unread.sender_id=u.id AND unread.recipient_id=$1 AND unread.read_at IS NULL) AS unread_count," +
       "last.message AS last_message,last.created_at AS last_message_at " +
       "FROM public.users u LEFT JOIN public.branches b ON b.id=u.branch_id " +
@@ -35,7 +42,7 @@ export const getMessagingContacts = async (req: AuthRequest, res: Response) => {
       "WHERE m.tenant_id=u.tenant_id AND ((m.sender_id=u.id AND m.recipient_id=$1) OR (m.sender_id=$1 AND m.recipient_id=u.id)) " +
       "ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last ON TRUE " +
       "WHERE u.tenant_id=app_current_tenant_id() AND u.status='ACTIVE' AND u.id<>$1 AND u.role::text=ANY($2::text[]) " +
-      "ORDER BY u.last_login DESC NULLS LAST,(last.created_at IS NULL),last.created_at DESC,u.full_name",
+      "ORDER BY (last.created_at IS NULL),last.created_at DESC,u.full_name",
       [req.user!.id, roles]
     );
     res.json({ contacts: result.rows });
@@ -48,7 +55,7 @@ export const getMessagingContacts = async (req: AuthRequest, res: Response) => {
 export const getStaffConversation = async (req: AuthRequest, res: Response) => {
   try {
     const peerId = Number(req.params.peerId);
-    const peer = await getPeer(req, peerId);
+    const peer = await getPeer(req, peerId, req.query.workspace === 'operations' && hasOperationsAccess(req));
     if (!peer) return res.status(404).json({ error: 'Staff member not found or not available for messaging' });
 
     const unread = await query(
@@ -74,7 +81,7 @@ export const getStaffConversation = async (req: AuthRequest, res: Response) => {
     params.push(101);
     const result = await query(
       "SELECT m.id,m.sender_id,m.recipient_id,m.message,m.branch_id,m.order_id,m.sender_context,m.created_at,m.read_at,m.edited_at,m.unsent_at," +
-      "sender.full_name AS sender_name,sender.role::text AS sender_role,b.name AS sender_branch_name " +
+      "sender.full_name AS sender_name,sender.role::text AS sender_role,CASE WHEN sender.role::text='ADMIN' THEN NULL ELSE b.name END AS sender_branch_name " +
       "FROM public.operations_messages m " +
       "JOIN public.users sender ON sender.id=m.sender_id AND sender.tenant_id=m.tenant_id " +
       "LEFT JOIN public.branches b ON b.id=sender.branch_id AND b.tenant_id=m.tenant_id " +
@@ -97,12 +104,11 @@ export const sendStaffMessage = async (req: AuthRequest, res: Response) => {
   const message = String(req.body.message || '').trim();
   if (!message || message.length > 2000) return res.status(400).json({ error: 'Enter a message of up to 2,000 characters' });
   try {
-    const recipient = await getPeer(req, recipientId);
-    if (!recipient) return res.status(403).json({ error: 'This staff member is not available for messaging' });
     const senderRole = req.user!.role;
     const senderContext = req.body.sender_context === 'OPERATIONS' ? 'OPERATIONS' : 'STAFF';
-    const hasOperationsAccess = ['ADMIN','MANAGER','OPERATIONS'].includes(senderRole) || (senderRole === 'DESKTOP_AGENT' && !!req.user!.operations_access_enabled);
-    if (senderContext === 'OPERATIONS' && !hasOperationsAccess) return res.status(403).json({ error: 'Operations access is not enabled' });
+    if (senderContext === 'OPERATIONS' && !hasOperationsAccess(req)) return res.status(403).json({ error: 'Operations access is not enabled' });
+    const recipient = await getPeer(req, recipientId, senderContext === 'OPERATIONS');
+    if (!recipient) return res.status(403).json({ error: 'This staff member is not available for messaging' });
     const branchId = senderRole === 'DESKTOP_AGENT' ? req.user!.branch_id : recipient.branch_id;
     const saved = await query(
       "INSERT INTO public.operations_messages(tenant_id,branch_id,sender_id,recipient_id,message,sender_context) " +

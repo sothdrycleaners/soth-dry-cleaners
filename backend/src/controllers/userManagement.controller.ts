@@ -602,7 +602,9 @@ export const updateUserRole = async (req: AuthRequest, res: Response) => {
     // Update role
     const result = await query(
       `UPDATE users 
-       SET role = $1, updated_at = CURRENT_TIMESTAMP
+       SET role = $1,
+           branch_id = CASE WHEN $1::text = 'ADMIN' THEN NULL ELSE branch_id END,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
        RETURNING id, email, full_name, role, status`,
       [role, userId]
@@ -660,9 +662,26 @@ export const updateUserBranch = async (req: AuthRequest, res: Response) => {
       return res.status(visibilityBlock.status).json(visibilityBlock.payload);
     }
 
-    const managerBlock = managerMayOnlyManageAgents(req, userCheck.rows[0].role);
+    const targetUser = userCheck.rows[0];
+    const managerBlock = managerMayOnlyManageAgents(req, targetUser.role);
     if (managerBlock) {
       return res.status(managerBlock.status).json(managerBlock.payload);
+    }
+
+    if (targetUser.role === 'ADMIN') {
+      if (branch_id !== null && branch_id !== undefined && branch_id !== '') {
+        return res.status(400).json({ error: 'Administrators are not assigned to a branch.' });
+      }
+      const normalized = await query(
+        `UPDATE users SET branch_id = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 RETURNING id, email, full_name, role, status, branch_id`,
+        [userId]
+      );
+      return res.json({
+        success: true,
+        message: 'Administrators remain unassigned to a branch.',
+        user: normalized.rows[0],
+      });
     }
 
     let branchId: number | null = null;

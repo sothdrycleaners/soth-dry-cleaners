@@ -499,6 +499,31 @@ const Payments = () => {
     }
   };
   
+  const handleExportXLSX = async () => {
+    try {
+      const params = new URLSearchParams(
+        Object.entries(filters).filter(([, value]) => value !== '') as [string, string][]
+      );
+      const response = await axios.get(`${API_BASE_URL}/payments/export/xlsx?${params}`, {
+        headers: { Authorization: `Bearer ${token}` }, responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `soth-payments-${filters.from_date || 'all-time'}${filters.to_date ? `-to-${filters.to_date}` : ''}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Payments exported to Excel successfully');
+    } catch (error) {
+      console.error('Failed to export payments to Excel:', error);
+      toast.error('Failed to export payments to Excel');
+    }
+  };
+
   const handleExportPDF = async () => {
     try {
       const params = new URLSearchParams({
@@ -848,6 +873,10 @@ const Payments = () => {
                   <Button variant="outline" onClick={handleExportCSV} className="flex-1 sm:flex-none">
                     <Download className="w-4 h-4 mr-2" />
                     Export CSV
+                  </Button>
+                  <Button variant="outline" onClick={handleExportXLSX} className="flex-1 sm:flex-none">
+                    <FileSpreadsheet className="w-4 h-4 mr-2" />
+                    Export Excel
                   </Button>
                   <Button variant="outline" onClick={handleExportPDF} className="flex-1 sm:flex-none">
                     <Download className="w-4 h-4 mr-2" />
