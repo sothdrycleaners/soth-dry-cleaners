@@ -1048,7 +1048,6 @@ export default function NewOrder() {
       });
 
       const order = response.data.order;
-      if (order?.id) setInvoiceDownloadOrderId(Number(order.id));
       if (response.data.duplicate_request) {
         resetOrderForm();
         orderRequestKeyRef.current = null;
@@ -1057,6 +1056,12 @@ export default function NewOrder() {
           description: `Order ${order.order_number} is already in Orders. No second order was created.`,
         });
         return;
+      }
+      // Automatically download invoices only for newly created day-to-day
+      // orders. Historical orders remain available for manual invoice download
+      // from Orders, and duplicate retries must not trigger another download.
+      if (order?.id && order.is_backdated !== true) {
+        setInvoiceDownloadOrderId(Number(order.id));
       }
 
       const customerSnapshot = selectedCustomer;
