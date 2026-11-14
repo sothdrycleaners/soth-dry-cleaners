@@ -1282,12 +1282,12 @@ export default function NewOrder() {
         </div>
 
         {/* Main POS split: Left = Cart/Payment, Right = Item Catalog */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-3 lg:min-h-0">
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-3 min-w-0 lg:min-h-0">
           
           {/* ===== LEFT PANEL: Cart + Payment (2/5 width) =====
                On phones the catalog is shown first, so items can be picked
                before the cart and payment section come into view. */}
-          <div className="order-2 lg:order-1 lg:col-span-2 flex flex-col gap-3 overflow-y-auto">
+          <div className="order-2 lg:order-1 lg:col-span-2 flex min-w-0 flex-col gap-3 overflow-y-auto">
             
             {/* Cart Items */}
             <div className="bg-card border rounded-lg">
@@ -2012,12 +2012,12 @@ export default function NewOrder() {
           </div>
 
           {/* ===== RIGHT PANEL: Item Catalog (3/5 width) ===== */}
-          <div className="order-1 lg:order-2 lg:col-span-3 flex flex-col min-h-0 bg-card border rounded-lg">
+          <div className="order-1 lg:order-2 lg:col-span-3 flex min-w-0 flex-col min-h-0 bg-card border rounded-lg">
             
             {/* Category Tabs + Search */}
             <div className="px-3 pt-3 pb-2 border-b space-y-2 shrink-0">
               {/* Category tabs like Odoo POS */}
-              <div className="flex gap-1 overflow-x-auto pb-1">
+              <div className="flex flex-wrap gap-1 pb-1">
                 {['ALL', 'gents', 'ladies', 'general', 'kids'].map((cat) => (
                   <Button
                     key={cat}
@@ -2053,15 +2053,18 @@ export default function NewOrder() {
 
             {/* Items grid. Capped on phones so the cart below stays reachable;
                 on desktop it simply fills the remaining column height. */}
-            <div className="flex-1 overflow-y-auto p-3 min-h-0 max-h-[60vh] lg:max-h-none">
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 min-h-0 max-h-[60vh] lg:max-h-none">
+              <div
+                className="grid min-w-0 gap-2"
+                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 155px), 1fr))' }}
+              >
                 {filteredPriceItems.map((item) => (
                   <div
                     key={item.id}
-                    className="border rounded-lg p-3 hover:shadow-md hover:border-primary/50 transition-all cursor-pointer group bg-background"
+                    className="min-w-0 border rounded-lg p-3 hover:shadow-md hover:border-primary/50 transition-all cursor-pointer group bg-background"
                   >
                     {/* Item name + category */}
-                    <p className="font-medium text-sm leading-tight truncate" title={item.name}>
+                    <p className="font-medium text-sm leading-tight whitespace-normal break-words" title={item.name}>
                       {item.name}
                     </p>
                     <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-1">
@@ -2083,7 +2086,7 @@ export default function NewOrder() {
                       {item.pricing_type === 'PER_KG' ? (
                         <div className="flex items-baseline justify-between gap-2">
                           <span className="text-muted-foreground shrink-0">⚖️ Per kg</span>
-                          <span className="font-semibold text-amber-600 dark:text-amber-400 min-w-0 text-right truncate">
+                          <span className="min-w-0 whitespace-normal break-words text-right font-semibold leading-tight text-amber-600 dark:text-amber-400">
                             {formatUGX(item.price_per_kg || item.price)}/kg
                           </span>
                         </div>
@@ -2091,7 +2094,7 @@ export default function NewOrder() {
                         <>
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="text-muted-foreground shrink-0">Wash</span>
-                            <span className="font-semibold min-w-0 text-right truncate">
+                            <span className="min-w-0 whitespace-normal break-words text-right font-semibold leading-tight">
                               {item.has_active_discount ? (
                                 <>
                                   <span className="line-through text-muted-foreground mr-1 font-normal">
@@ -2104,7 +2107,7 @@ export default function NewOrder() {
                           </div>
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="text-muted-foreground shrink-0">Iron</span>
-                            <span className="font-semibold min-w-0 text-right truncate">
+                            <span className="min-w-0 whitespace-normal break-words text-right font-semibold leading-tight">
                               {Number(item.ironing_price) > 0 ? (
                                 item.has_active_discount ? formatUGX(item.effective_ironing_price || item.ironing_price) : formatUGX(item.ironing_price)
                               ) : (
@@ -2117,33 +2120,37 @@ export default function NewOrder() {
                     </div>
                     
                     {/* Quick-add service buttons (2 rows for visibility) */}
-                    <div className="mt-2 space-y-1">
-                      <div className="flex gap-1">
+                    <div className="mt-2 grid grid-cols-3 gap-1 sm:grid-cols-2">
                         <Button
                           size="sm"
                           variant="outline"
-                          className="flex-1 h-10 lg:h-7 text-xs lg:text-[11px] px-1.5 font-medium hover:bg-primary hover:text-primary-foreground"
+                          aria-label={`Add wash service for ${item.name}`}
+                          title="Add wash service"
+                          className="min-w-0 flex-1 h-10 lg:h-7 text-xs lg:text-[11px] px-1.5 font-medium hover:bg-primary hover:text-primary-foreground"
                           onClick={() => addItemToOrder(item, 'WASH')}
                         >
-                          🧺<span className="hidden min-[360px]:inline ml-0.5">Wash</span>
+                          🧺<span className="hidden sm:inline ml-0.5">Wash</span>
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
-                          className={`flex-1 h-10 lg:h-7 text-xs lg:text-[11px] px-1.5 font-medium ${Number(item.ironing_price) > 0 ? 'border-blue-300 text-blue-600 hover:bg-blue-500 hover:text-white dark:border-blue-700 dark:text-blue-400' : 'opacity-40 cursor-not-allowed'}`}
+                          aria-label={`Add ironing service for ${item.name}`}
+                          title={Number(item.ironing_price) > 0 ? 'Add ironing service' : 'Ironing is not available for this item'}
+                          className={`min-w-0 flex-1 h-10 lg:h-7 text-xs lg:text-[11px] px-1.5 font-medium ${Number(item.ironing_price) > 0 ? 'border-blue-300 text-blue-600 hover:bg-blue-500 hover:text-white dark:border-blue-700 dark:text-blue-400' : 'opacity-40 cursor-not-allowed'}`}
                           onClick={() => addItemToOrder(item, 'IRON')}
                           disabled={!(Number(item.ironing_price) > 0)}
                         >
-                          🔥<span className="hidden min-[360px]:inline ml-0.5">Iron</span>
+                          🔥<span className="hidden sm:inline ml-0.5">Iron</span>
                         </Button>
-                      </div>
                       <Button
                         size="sm"
                         variant="outline"
-                        className="w-full h-10 lg:h-7 text-xs lg:text-[11px] px-1.5 font-medium border-orange-300 text-orange-600 hover:bg-orange-500 hover:text-white dark:border-orange-700 dark:text-orange-400"
+                        aria-label={`Add express service for ${item.name}`}
+                        title="Add express service"
+                        className="col-span-1 h-10 min-w-0 px-1.5 text-xs font-medium border-orange-300 text-orange-600 hover:bg-orange-500 hover:text-white dark:border-orange-700 dark:text-orange-400 sm:col-span-2 lg:h-7 lg:text-[11px]"
                         onClick={() => addItemToOrder(item, 'EXPRESS')}
                       >
-                        ⚡<span className="hidden min-[360px]:inline ml-0.5">Express</span>
+                        ⚡<span className="hidden sm:inline ml-0.5">Express</span>
                       </Button>
                     </div>
                   </div>
