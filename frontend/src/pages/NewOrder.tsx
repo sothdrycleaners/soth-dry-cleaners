@@ -644,7 +644,7 @@ export default function NewOrder() {
         type="button"
         size="icon"
         variant="ghost"
-        className={`h-7 w-7 shrink-0 ${hasDeadline ? 'text-orange-600' : 'text-muted-foreground'}`}
+        className={`absolute right-2 top-2 z-10 h-7 w-7 ${hasDeadline ? 'text-orange-600' : 'text-muted-foreground'}`}
         aria-label={hasDeadline ? `Edit Express deadline for ${itemName}` : `Set optional Express deadline for ${itemName}`}
         title={hasDeadline ? `Express deadline set for ${itemName}` : `Set optional Express deadline for ${itemName}`}
         onClick={() => openExpressDeadline(expressIndex)}
@@ -2257,15 +2257,15 @@ export default function NewOrder() {
                 {filteredPriceItems.map((item) => (
                   <div
                     key={item.id}
-                    className="min-w-0 border rounded-lg p-3 hover:shadow-md hover:border-primary/50 transition-all cursor-pointer group bg-background"
+                    className="relative min-w-0 border rounded-lg p-3 hover:shadow-md hover:border-primary/50 transition-all cursor-pointer group bg-background"
                   >
                     {/* Item name + category */}
-                    <div className="flex min-w-0 items-start gap-1">
-                      <p className="min-w-0 flex-1 font-medium text-sm leading-tight whitespace-normal break-words" title={item.name}>
+                    <div className="flex min-w-0 items-start">
+                      <p className="min-w-0 flex-1 pr-8 font-medium text-sm leading-tight whitespace-normal break-words" title={item.name}>
                         {item.name}
                       </p>
-                      {renderCatalogExpressClock(item.id, item.name)}
                     </div>
+                    {renderCatalogExpressClock(item.id, item.name)}
                     <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-1">
                       <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground capitalize lg:text-[10px]">
                         {item.category === 'home_services' ? 'Home' : item.category}
