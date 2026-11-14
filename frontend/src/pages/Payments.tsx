@@ -66,6 +66,7 @@ import {
   Printer,
   XCircle,
   Trash2,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface Payment {
