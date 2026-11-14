@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type { AxiosRequestConfig, AxiosResponse, RawAxiosResponseHeaders } from 'axios';
-import { isInvalidSessionResponse } from '@/lib/auth-session';
+import { isInvalidSessionResponse, recordAuthExitReason } from '@/lib/auth-session';
 
 const API_CACHE_PREFIX = 'soth-api-cache:';
 const API_CACHE_TTL_MS = 30000;
@@ -158,6 +158,7 @@ export const setupAxiosInterceptors = () => {
 
       // Only force logout when an authenticated request is rejected.
       if (isInvalidSessionResponse(status, error.response?.data) && hasAuthHeader && !isPublicAuthRoute) {
+        recordAuthExitReason('axios-confirmed-invalid-session');
         // Clear stored authentication data
         storePostLoginRedirect();
         localStorage.removeItem('soth_token');

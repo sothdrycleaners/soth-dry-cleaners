@@ -1,5 +1,5 @@
 import axios, { AxiosHeaders } from 'axios';
-import { isInvalidSessionResponse } from '@/lib/auth-session';
+import { isInvalidSessionResponse, recordAuthExitReason } from '@/lib/auth-session';
 
 const devApiUrl = import.meta.env.DEV ? import.meta.env.VITE_API_URL : undefined;
 
@@ -69,6 +69,7 @@ api.interceptors.response.use(
 
     if (isInvalidSessionResponse(status, error.response?.data) && hasAuthHeader && !isPublicAuthRoute) {
       // Clear the session only when the server confirms this token is unusable.
+      recordAuthExitReason('api-confirmed-invalid-session');
       storePostLoginRedirect();
       localStorage.removeItem('soth_token');
       localStorage.removeItem('soth_user');

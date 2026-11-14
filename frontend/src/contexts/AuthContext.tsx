@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '@/lib/api';
+import { recordAuthExitReason } from '@/lib/auth-session';
 import { useNavigate } from 'react-router-dom';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import SessionExpiredModal from '@/components/SessionExpiredModal';
@@ -50,7 +51,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<{ requiresPin: boolean; challengeToken?: string }>;
   completeAdminPinLogin: (challengeToken: string, pin: string) => Promise<void>;
   requestAdminPinReset: (challengeToken?: string) => Promise<string>;
-  logout: (preserveRedirect?: boolean) => void;
+  logout: (preserveRedirect?: boolean, reason?: string) => void;
   updateUser: (updatedUser: User) => void;
   refreshUser: () => void;  // Reload user from localStorage
   loading: boolean;
@@ -168,7 +169,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [getSessionTimeout]);
 
   // Logout function (defined before resetInactivityTimer to avoid dependency issues)
-  const logout = useCallback((preserveRedirect = false) => {
+  const logout = useCallback((preserveRedirect = false, reason = preserveRedirect ? 'session-timeout' : 'manual-logout') => {
+    recordAuthExitReason(reason);
     if (preserveRedirect) {
       storePostLoginRedirect();
     } else {
@@ -207,7 +209,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const handleStorage = (event: StorageEvent) => {
       if (event.storageArea !== localStorage) return;
       if ((event.key === TOKEN_KEY && !event.newValue) || event.key === null) {
-        logout();
+        logout(false, event.key === null ? 'another-tab-cleared-storage' : 'another-tab-removed-token');
       }
     };
 
@@ -265,7 +267,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setShowTimeoutWarning(false);
         setShowExpiredModal(true);
         logoutTimer.current = setTimeout(() => {
-          logout(true);
+          logout(true, 'inactivity-timer');
         }, 3000); // Give user 3 seconds to see the expired message before redirecting
       };
 
@@ -344,6 +346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Check staleness before restoring, otherwise a session that expired while
       // the app was closed would silently resume.
       if (isSessionStale()) {
+        recordAuthExitReason('stale-session-on-startup');
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
         localStorage.removeItem(LAST_ACTIVITY_KEY);
@@ -357,6 +360,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(parsedUser);
         resetInactivityTimer();
       } catch (error) {
+        recordAuthExitReason('stored-user-data-invalid');
         console.error('Failed to parse stored user:', error);
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
@@ -416,7 +420,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (document.visibilityState !== 'visible') return;
       const storedToken = localStorage.getItem(TOKEN_KEY);
       if (storedToken && isSessionStale()) {
-        logout(true);
+        logout(true, 'inactive-after-tab-return');
       }
     };
 
@@ -435,6 +439,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(data.user);
     localStorage.setItem(TOKEN_KEY, data.token);
     localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    sessionStorage.removeItem('soth_auth_exit_reason');
     markActivity(true);
     resetInactivityTimer();
     if (data.user.must_change_password) {
@@ -529,7 +534,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setShowTimeoutWarning(false);
     setShowExpiredModal(true);
     logoutTimer.current = setTimeout(() => {
-      logout(true);
+      logout(true, 'session-timeout-confirmed');
     }, 3000); // Give user 3 seconds to see the expired message before redirecting
   };
 
