@@ -1517,14 +1517,14 @@ export default function NewOrder() {
                       </div>
 
                       {/* Adjustment row: toggle between Bargain (deduct) and Price Up (add) */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
                         {canPriceUp && (
                           /* Admin/Manager: toggle between bargain and price-up */
-                          <div className="flex rounded-md border overflow-hidden shrink-0 h-9 lg:h-7">
+                          <div className="flex h-9 w-full shrink-0 overflow-hidden rounded-md border sm:w-auto lg:h-7">
                             <button
                               type="button"
                               onClick={() => setItemAdjMode(index, 'bargain')}
-                              className={`px-2 text-[10px] font-semibold transition-colors ${
+                              className={`flex-1 whitespace-nowrap px-2 text-[10px] font-semibold transition-colors sm:flex-none ${
                                 getItemAdjMode(index) === 'bargain'
                                   ? 'bg-primary text-primary-foreground'
                                   : 'bg-background text-muted-foreground hover:bg-muted'
@@ -1536,7 +1536,7 @@ export default function NewOrder() {
                             <button
                               type="button"
                               onClick={() => setItemAdjMode(index, 'priceup')}
-                              className={`px-2 text-[10px] font-semibold transition-colors border-l ${
+                              className={`flex-1 whitespace-nowrap border-l px-2 text-[10px] font-semibold transition-colors sm:flex-none ${
                                 getItemAdjMode(index) === 'priceup'
                                   ? 'bg-amber-500 text-white'
                                   : 'bg-background text-muted-foreground hover:bg-muted'
@@ -1548,13 +1548,13 @@ export default function NewOrder() {
                           </div>
                         )}
                         {(!canPriceUp || getItemAdjMode(index) === 'bargain') && (
-                          <span className="text-[10px] text-muted-foreground shrink-0">
+                          <span className="text-[10px] text-muted-foreground sm:shrink-0">
                             {itemDiscountMode === 'percent' ? 'Discount %' : 'Discount UGX'}
                           </span>
                         )}
                         {(!canPriceUp || getItemAdjMode(index) === 'bargain') &&
                           itemDiscountMode === 'percent' && maxItemDiscountPercent >= 50 && (
-                          <div className="flex items-center gap-1 shrink-0">
+                          <div className="order-last flex min-w-0 w-full flex-wrap items-center gap-1 sm:order-none sm:w-auto sm:shrink-0">
                             {[50, 100].filter((percent) => percent <= maxItemDiscountPercent).map((percent) => (
                               <Button
                                 key={percent}
@@ -1597,7 +1597,7 @@ export default function NewOrder() {
                               updateItemDiscount(index, e.target.value);
                             }
                           }}
-                          className={`h-9 lg:h-7 flex-1 text-right text-xs ${
+                          className={`order-2 h-10 w-full min-w-0 text-right text-xs sm:order-none sm:h-9 sm:w-auto sm:flex-1 lg:h-7 ${
                             canPriceUp && getItemAdjMode(index) === 'priceup'
                               ? 'border-amber-400 focus-visible:ring-amber-400'
                               : ''
@@ -1612,10 +1612,10 @@ export default function NewOrder() {
                         />
                         {/* Show the sign badge when amount > 0 */}
                         {canPriceUp && getItemAdjMode(index) === 'priceup' && Number(item.surcharge_amount || 0) > 0 && (
-                          <span className="text-[10px] font-bold text-amber-600 shrink-0">+{formatUGX(item.surcharge_amount!)} total</span>
+                          <span className="order-last min-w-0 break-words text-right text-[10px] font-bold text-amber-600 sm:order-none sm:shrink-0">+{formatUGX(item.surcharge_amount!)} total</span>
                         )}
                         {(getItemAdjMode(index) === 'bargain' || !canPriceUp) && Number(item.discount_amount || 0) > 0 && (
-                          <span className="text-[10px] font-bold text-primary shrink-0">-{formatUGX(item.discount_amount!)} total</span>
+                          <span className="order-last min-w-0 break-words text-right text-[10px] font-bold text-primary sm:order-none sm:shrink-0">-{formatUGX(item.discount_amount!)} total</span>
                         )}
                       </div>
 
