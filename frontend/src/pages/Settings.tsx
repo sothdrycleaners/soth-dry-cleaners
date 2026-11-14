@@ -168,8 +168,8 @@ export default function Settings() {
   const [desktopAgentItemDiscountPercent, setDesktopAgentItemDiscountPercent] = useState('100');
   const [managerItemDiscountPercent, setManagerItemDiscountPercent] = useState('100');
   const [adminItemDiscountPercent, setAdminItemDiscountPercent] = useState('100');
-  const [itemDiscountMode, setItemDiscountMode] = useState<'percent' | 'amount'>('percent');
-  const [orderDiscountMode, setOrderDiscountMode] = useState<'percent' | 'amount'>('percent');
+  const [itemDiscountMode, setItemDiscountMode] = useState<'percent' | 'amount' | 'both'>('both');
+  const [orderDiscountMode, setOrderDiscountMode] = useState<'percent' | 'amount' | 'both'>('both');
   const [savingBargainLimits, setSavingBargainLimits] = useState(false);
 
   // Payment accounts for on-account / partial WhatsApp receipts
@@ -404,8 +404,8 @@ export default function Settings() {
       setDesktopAgentItemDiscountPercent(toLimit(response.data.desktop_agent_item_discount_percent, 100));
       setManagerItemDiscountPercent(toLimit(response.data.manager_item_discount_percent, 100));
       setAdminItemDiscountPercent(toLimit(response.data.admin_item_discount_percent, 100));
-      setItemDiscountMode(response.data.item_discount_mode === 'amount' ? 'amount' : 'percent');
-      setOrderDiscountMode(response.data.order_discount_mode === 'amount' ? 'amount' : 'percent');
+      setItemDiscountMode(['percent', 'amount', 'both'].includes(response.data.item_discount_mode) ? response.data.item_discount_mode : 'both');
+      setOrderDiscountMode(['percent', 'amount', 'both'].includes(response.data.order_discount_mode) ? response.data.order_discount_mode : 'both');
     } catch (error) {
       console.error('Failed to load bargain limits:', error);
     }
@@ -774,10 +774,14 @@ export default function Settings() {
 
       const perItemSummary = itemDiscountMode === 'percent'
         ? `Per item: desktop agent ${desktopAgentItemDiscount}%, manager ${managerItemDiscount}%, administrator ${adminItemDiscount}%.`
-        : `Per item: desktop agent ${desktopAgentItem.toLocaleString()} UGX, manager ${managerItem.toLocaleString()} UGX, administrator ${adminItem.toLocaleString()} UGX.`;
+        : itemDiscountMode === 'amount'
+          ? `Per item: desktop agent ${desktopAgentItem.toLocaleString()} UGX, manager ${managerItem.toLocaleString()} UGX, administrator ${adminItem.toLocaleString()} UGX.`
+          : `Per item: staff can choose percentage (up to ${desktopAgentItemDiscount}% / ${managerItemDiscount}% / ${adminItemDiscount}%) or fixed UGX (up to ${desktopAgentItem.toLocaleString()} / ${managerItem.toLocaleString()} / ${adminItem.toLocaleString()}).`;
       const wholeOrderSummary = orderDiscountMode === 'percent'
         ? `Whole order: desktop agent ${desktopAgentDiscount}%, manager ${managerDiscount}%, administrator ${adminDiscount}%.`
-        : `Whole order: desktop agent ${desktopAgent.toLocaleString()} UGX, manager ${manager.toLocaleString()} UGX, administrator ${admin.toLocaleString()} UGX.`;
+        : orderDiscountMode === 'amount'
+          ? `Whole order: desktop agent ${desktopAgent.toLocaleString()} UGX, manager ${manager.toLocaleString()} UGX, administrator ${admin.toLocaleString()} UGX.`
+          : `Whole order: staff can choose percentage (up to ${desktopAgentDiscount}% / ${managerDiscount}% / ${adminDiscount}%) or fixed UGX (up to ${desktopAgent.toLocaleString()} / ${manager.toLocaleString()} / ${admin.toLocaleString()}).`;
 
       toast({
         title: 'Bargain limits saved',
@@ -2464,14 +2468,14 @@ Don't miss out! ✨`;
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                Administrators choose whether staff enter per-item and whole-order discounts as percentages or fixed UGX amounts.
-                Staff only see the mode selected here. When staff apply a bargain, administrators are notified for tracking purposes.
+                Choose Percentage, Fixed UGX, or Both separately for per-item and whole-order discounts. Both lets staff choose one mode for each item or order; the corresponding role limit is enforced.
+                When staff apply a bargain, administrators are notified for tracking purposes.
               </AlertDescription>
             </Alert>
 
             <div className="space-y-6">
               {/* Overall limits */}
-              {orderDiscountMode === 'amount' && <div className="space-y-3">
+              {orderDiscountMode !== 'percent' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Overall Order Bargain Limit (UGX)</h3>
                 <p className="text-xs text-muted-foreground">Maximum fixed UGX bargain a staff member may apply to the whole order. Per-item discounts are controlled separately.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2491,7 +2495,7 @@ Don't miss out! ✨`;
               </div>}
 
               {/* Per-item limits */}
-              {itemDiscountMode === 'amount' && <div className="space-y-3">
+              {itemDiscountMode !== 'percent' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Bargain Limit (UGX)</h3>
                 <p className="text-xs text-muted-foreground">Maximum fixed UGX bargain a staff member may apply to a single item line. This ceiling is independent of the whole-order limit.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2522,11 +2526,15 @@ Don't miss out! ✨`;
                       className={`px-3 text-xs font-semibold border-l ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
                       Fixed UGX
                     </button>
+                    <button type="button" onClick={() => setOrderDiscountMode('both')}
+                      className={`border-l px-3 text-xs font-semibold ${orderDiscountMode === 'both' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Both
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {orderDiscountMode === 'percent' && <div className="space-y-3">
+              {orderDiscountMode !== 'amount' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Whole-Order Discount Limit (%)</h3>
                 <p className="text-xs text-muted-foreground">Maximum percentage discount applied to the entire order subtotal. This setting does not change per-item discounts.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2557,11 +2565,15 @@ Don't miss out! ✨`;
                       className={`px-3 text-xs font-semibold border-l ${itemDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
                       Fixed UGX
                     </button>
+                    <button type="button" onClick={() => setItemDiscountMode('both')}
+                      className={`border-l px-3 text-xs font-semibold ${itemDiscountMode === 'both' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Both
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {itemDiscountMode === 'percent' && <div className="space-y-3">
+              {itemDiscountMode !== 'amount' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Discount Limit (%)</h3>
                 <p className="text-xs text-muted-foreground">Maximum percentage each role may deduct from an item line. Set any role to 100% to allow a complimentary item. Item discounts are separate from the whole-order discount cap.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2584,8 +2596,8 @@ Don't miss out! ✨`;
             <Alert className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
               <Shield className="h-4 w-4 text-blue-600" />
               <AlertDescription className="text-blue-800 dark:text-blue-200">
-                <strong>How it works:</strong> Administrators choose the allowed input mode for per-item and whole-order discounts here.
-                Staff see only the selected mode when creating orders. Percentage limits and fixed UGX limits are separate settings.
+                <strong>How it works:</strong> Percentage, Fixed UGX, and Both are configured independently for per-item and whole-order discounts.
+                With Both selected, staff choose one mode at a time when creating an order. Each choice uses its own role limit.
               </AlertDescription>
             </Alert>
 

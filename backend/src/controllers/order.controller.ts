@@ -561,9 +561,13 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     const roleKey = req.user!.role === 'DESKTOP_AGENT' ? 'desktop_agent'
       : req.user!.role === 'MANAGER' ? 'manager' : 'admin';
     const defaultItemDiscountPercent = 100;
-    const configuredItemDiscountMode = configuredDiscountLimits.item_discount_mode === 'amount' ? 'amount' : 'percent';
-    const configuredOrderDiscountMode = configuredDiscountLimits.order_discount_mode === 'amount' ? 'amount' : 'percent';
-    const configuredItemDiscountPercent = configuredDiscountLimits.item_discount_mode === 'percent'
+    const configuredItemDiscountMode = ['percent', 'amount', 'both'].includes(String(configuredDiscountLimits.item_discount_mode))
+      ? String(configuredDiscountLimits.item_discount_mode)
+      : 'both';
+    const configuredOrderDiscountMode = ['percent', 'amount', 'both'].includes(String(configuredDiscountLimits.order_discount_mode))
+      ? String(configuredDiscountLimits.order_discount_mode)
+      : 'both';
+    const configuredItemDiscountPercent = configuredItemDiscountMode !== 'amount'
       ? Number(configuredDiscountLimits[roleKey + '_item'])
       : 100;
     const maxItemDiscountPercent = Number.isFinite(configuredItemDiscountPercent) && configuredItemDiscountPercent >= 0 && configuredItemDiscountPercent <= 100
@@ -688,7 +692,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       if (itemDiscountMode !== 'percent' && itemDiscountMode !== 'amount') {
         throw new Error(`Choose either a percentage or UGX discount for ${priceItem.name}`);
       }
-      if (itemDiscountMode !== configuredItemDiscountMode) {
+      if (configuredItemDiscountMode !== 'both' && itemDiscountMode !== configuredItemDiscountMode) {
         throw new Error(`The administrator has set per-item discounts to ${configuredItemDiscountMode === 'percent' ? 'percentage' : 'fixed UGX'} mode`);
       }
       if (itemDiscountMode === 'percent' && requestedItemDiscountPercent === null) {
@@ -757,7 +761,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     if (orderDiscountMode !== 'percent' && orderDiscountMode !== 'amount') {
       throw new Error('Choose either a percentage or fixed UGX discount for the whole order');
     }
-    if (orderDiscountMode !== configuredOrderDiscountMode) {
+    if (configuredOrderDiscountMode !== 'both' && orderDiscountMode !== configuredOrderDiscountMode) {
       throw new Error(`The administrator has set whole-order discounts to ${configuredOrderDiscountMode === 'percent' ? 'percentage' : 'fixed UGX'} mode`);
     }
     if (orderDiscountMode === 'percent' && requestedBargainAmount > 0) {

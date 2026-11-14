@@ -390,15 +390,15 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
     let discountLimits: Record<string, any> = {
       desktop_agent: 10, manager: 20, admin: 50,
       desktop_agent_item: 100, manager_item: 100, admin_item: 100,
-      item_discount_mode: 'percent', order_discount_mode: 'percent',
+      item_discount_mode: 'both', order_discount_mode: 'both',
     };
     if (discountResult.rows[0]?.setting_value) {
       try {
         const storedLimits = JSON.parse(discountResult.rows[0].setting_value);
         discountLimits = { ...discountLimits, ...storedLimits };
-        if (!['percent', 'amount'].includes(storedLimits.item_discount_mode)) {
+        if (!['percent', 'amount', 'both'].includes(storedLimits.item_discount_mode)) {
           // Legacy settings predate the mode selector; use the current per-item defaults.
-          discountLimits.item_discount_mode = 'percent';
+          discountLimits.item_discount_mode = 'both';
           discountLimits.desktop_agent_item = 100;
           discountLimits.manager_item = 100;
           discountLimits.admin_item = 100;
@@ -422,8 +422,8 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
       desktop_agent_item_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent_item)) ? Number(discountLimits.desktop_agent_item) : 100,
       manager_item_discount_percent: Number.isFinite(Number(discountLimits.manager_item)) ? Number(discountLimits.manager_item) : 100,
       admin_item_discount_percent: Number.isFinite(Number(discountLimits.admin_item)) ? Number(discountLimits.admin_item) : 100,
-      item_discount_mode: discountLimits.item_discount_mode === 'amount' ? 'amount' : 'percent',
-      order_discount_mode: discountLimits.order_discount_mode === 'amount' ? 'amount' : 'percent',
+      item_discount_mode: ['percent', 'amount', 'both'].includes(discountLimits.item_discount_mode) ? discountLimits.item_discount_mode : 'both',
+      order_discount_mode: ['percent', 'amount', 'both'].includes(discountLimits.order_discount_mode) ? discountLimits.order_discount_mode : 'both',
     });
   } catch (error) {
     console.error('Get bargain limits error:', error);
@@ -488,8 +488,8 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
     if (desktopAgent < 0 || manager < 0 || (admin !== null && admin < 0)) {
       return res.status(400).json({ error: 'Bargain limits cannot be negative' });
     }
-    if (!['percent', 'amount'].includes(item_discount_mode) || !['percent', 'amount'].includes(order_discount_mode)) {
-      return res.status(400).json({ error: 'Choose either percentage or fixed UGX for each discount mode' });
+    if (!['percent', 'amount', 'both'].includes(item_discount_mode) || !['percent', 'amount', 'both'].includes(order_discount_mode)) {
+      return res.status(400).json({ error: 'Choose percentage, fixed UGX, or both for each discount mode' });
     }
     if (managerDiscount < desktopAgentDiscount || adminDiscount < managerDiscount) {
       return res.status(400).json({ error: 'Order discount percentages must follow Desktop Agent <= Manager <= Administrator' });

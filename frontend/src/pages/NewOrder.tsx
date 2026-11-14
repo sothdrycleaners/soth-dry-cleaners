@@ -245,6 +245,8 @@ export default function NewOrder() {
   const setItemAdjMode = (index: number, mode: 'bargain' | 'priceup') => {
     setItemAdjModes(prev => ({ ...prev, [index]: mode }));
   };
+  const getLineDiscountMode = (item: OrderItem): 'percent' | 'amount' =>
+    item.discount_mode === 'amount' ? 'amount' : 'percent';
 
   // After create: offer WhatsApp Messenger
   const [whatsappDialogOpen, setWhatsappDialogOpen] = useState(false);
@@ -277,6 +279,8 @@ export default function NewOrder() {
   const [bargainAmount, setBargainAmount] = useState(0);
   const [orderDiscountMode, setOrderDiscountMode] = useState<'percent' | 'amount'>('percent');
   const [itemDiscountMode, setItemDiscountMode] = useState<'percent' | 'amount'>('percent');
+  const [allowedOrderDiscountMode, setAllowedOrderDiscountMode] = useState<'percent' | 'amount' | 'both'>('both');
+  const [allowedItemDiscountMode, setAllowedItemDiscountMode] = useState<'percent' | 'amount' | 'both'>('both');
   const [orderSurchargeAmount, setOrderSurchargeAmount] = useState(0);
   const [maxBargainAmount, setMaxBargainAmount] = useState(0);
   const [maxItemBargainAmount, setMaxItemBargainAmount] = useState(0);
@@ -405,8 +409,16 @@ export default function NewOrder() {
       });
       setMaxBargainAmount(Number(response.data.user.max_bargain_amount) || 0);
       setMaxItemBargainAmount(Number(response.data.user.max_item_bargain_amount) || 0);
-      setItemDiscountMode(response.data.user.item_discount_mode === 'amount' ? 'amount' : 'percent');
-      setOrderDiscountMode(response.data.user.order_discount_mode === 'amount' ? 'amount' : 'percent');
+      const configuredItemMode = ['percent', 'amount', 'both'].includes(response.data.user.item_discount_mode)
+        ? response.data.user.item_discount_mode
+        : 'both';
+      const configuredOrderMode = ['percent', 'amount', 'both'].includes(response.data.user.order_discount_mode)
+        ? response.data.user.order_discount_mode
+        : 'both';
+      setAllowedItemDiscountMode(configuredItemMode);
+      setAllowedOrderDiscountMode(configuredOrderMode);
+      setItemDiscountMode(configuredItemMode === 'amount' ? 'amount' : 'percent');
+      setOrderDiscountMode(configuredOrderMode === 'amount' ? 'amount' : 'percent');
       const configuredDiscount = Number(response.data.user.max_discount_percent);
       setMaxDiscountPercent(Number.isFinite(configuredDiscount) && configuredDiscount >= 0
         ? configuredDiscount
@@ -728,6 +740,23 @@ export default function NewOrder() {
   };
 
   /** Per-item price-up (surcharge) — admin/manager only */
+  const switchItemDiscountMode = (index: number, mode: 'percent' | 'amount') => {
+    const current = orderItems[index];
+    if (!current || getLineDiscountMode(current) === mode) return;
+    const updated = [...orderItems];
+    updated[index] = {
+      ...current,
+      discount_mode: mode,
+      discount_amount: 0,
+      item_discount_percent: mode === 'percent' ? 0 : undefined,
+      discount_basis_quantity: undefined,
+      discount_basis_amount: 0,
+      discount_scales_with_quantity: false,
+      subtotal: computeLineSubtotal(current.quantity, current.unit_price, 0, current.surcharge_amount || 0),
+    };
+    setOrderItems(updated);
+  };
+
   const updateItemSurcharge = (index: number, rawValue: string) => {
     const current = orderItems[index];
     if (!current) return;
@@ -1549,11 +1578,31 @@ export default function NewOrder() {
                         )}
                         {(!canPriceUp || getItemAdjMode(index) === 'bargain') && (
                           <span className="text-[10px] text-muted-foreground sm:shrink-0">
-                            {itemDiscountMode === 'percent' ? 'Discount %' : 'Discount UGX'}
+                            {getLineDiscountMode(item) === 'percent' ? 'Discount %' : 'Discount UGX'}
                           </span>
                         )}
+                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') && allowedItemDiscountMode === 'both' && (
+                          <div className="flex w-full overflow-hidden rounded-md border sm:w-auto">
+                            <button
+                              type="button"
+                              aria-pressed={getLineDiscountMode(item) === 'percent'}
+                              onClick={() => switchItemDiscountMode(index, 'percent')}
+                              className={`flex-1 px-2 py-1 text-[10px] font-semibold sm:flex-none ${getLineDiscountMode(item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                            >
+                              Percentage
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={getLineDiscountMode(item) === 'amount'}
+                              onClick={() => switchItemDiscountMode(index, 'amount')}
+                              className={`flex-1 border-l px-2 py-1 text-[10px] font-semibold sm:flex-none ${getLineDiscountMode(item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                            >
+                              Fixed UGX
+                            </button>
+                          </div>
+                        )}
                         {(!canPriceUp || getItemAdjMode(index) === 'bargain') &&
-                          itemDiscountMode === 'percent' && maxItemDiscountPercent >= 50 && (
+                          getLineDiscountMode(item) === 'percent' && maxItemDiscountPercent >= 50 && (
                           <div className="order-last flex min-w-0 w-full flex-wrap items-center gap-1 sm:order-none sm:w-auto sm:shrink-0">
                             {[50, 100].filter((percent) => percent <= maxItemDiscountPercent).map((percent) => (
                               <Button
@@ -1579,19 +1628,19 @@ export default function NewOrder() {
                           type="number"
                           inputMode="numeric"
                           min={0}
-                          max={(!canPriceUp || getItemAdjMode(index) === 'bargain') && itemDiscountMode === 'percent'
+                          max={(!canPriceUp || getItemAdjMode(index) === 'bargain') && getLineDiscountMode(item) === 'percent'
                             ? maxItemDiscountPercent : undefined}
-                          step={(!canPriceUp || getItemAdjMode(index) === 'bargain') && itemDiscountMode === 'percent' ? 1 : 500}
+                          step={(!canPriceUp || getItemAdjMode(index) === 'bargain') && getLineDiscountMode(item) === 'percent' ? 1 : 500}
                           value={canPriceUp && getItemAdjMode(index) === 'priceup'
                             ? (item.surcharge_per_unit ? String(item.surcharge_per_unit) : '')
-                            : itemDiscountMode === 'percent'
+                            : getLineDiscountMode(item) === 'percent'
                               ? (item.item_discount_percent ?? '')
                               : (item.discount_amount ? String(Math.round(Number(item.discount_amount) / Number(item.quantity))) : '')}
                           placeholder="0"
                           onChange={(e) => {
                             if (canPriceUp && getItemAdjMode(index) === 'priceup') {
                               updateItemSurcharge(index, e.target.value);
-                            } else if (itemDiscountMode === 'percent') {
+                            } else if (getLineDiscountMode(item) === 'percent') {
                               updateItemDiscountPercent(index, Number(e.target.value) || 0);
                             } else {
                               updateItemDiscount(index, e.target.value);
@@ -1605,7 +1654,7 @@ export default function NewOrder() {
                           title={
                             canPriceUp && getItemAdjMode(index) === 'priceup'
                               ? 'Price-up per unit for stains or special treatment; multiplies with quantity.'
-                              : itemDiscountMode === 'percent'
+                              : getLineDiscountMode(item) === 'percent'
                                 ? `Percentage discount on this line, up to ${maxItemDiscountPercent}%. It recalculates with quantity.`
                                 : `Fixed bargain per unit; multiplies with quantity. Limit: ${maxItemBargainAmount > 0 ? formatUGX(maxItemBargainAmount) : 'no separate amount limit'}`
                           }
@@ -1705,6 +1754,37 @@ export default function NewOrder() {
               {/* Money controls: two across on phones so the "(max …)" hints
                   stay on one or two lines instead of stacking three deep */}
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                {allowedOrderDiscountMode === 'both' && (
+                  <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 lg:col-span-3">
+                    <Label className="text-xs text-muted-foreground">Whole-order discount mode</Label>
+                    <div className="flex overflow-hidden rounded-md border">
+                      <button
+                        type="button"
+                        aria-pressed={orderDiscountMode === 'percent'}
+                        onClick={() => {
+                          setOrderDiscountMode('percent');
+                          setTransactionDiscount(0);
+                          setBargainAmount(0);
+                        }}
+                        className={`px-3 py-1.5 text-xs font-semibold ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                      >
+                        Percentage
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={orderDiscountMode === 'amount'}
+                        onClick={() => {
+                          setOrderDiscountMode('amount');
+                          setTransactionDiscount(0);
+                          setBargainAmount(0);
+                        }}
+                        className={`border-l px-3 py-1.5 text-xs font-semibold ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                      >
+                        Fixed UGX
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {orderDiscountMode === 'percent' && <div>
                   <Label className="text-xs text-muted-foreground">
                     Whole-order discount (%) <span className="text-muted-foreground/70">(admin-set mode; max {maxDiscountPercent}%)</span>

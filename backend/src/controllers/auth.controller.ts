@@ -699,8 +699,8 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     );
     user.max_discount_percent = user.role === 'DESKTOP_AGENT' ? 10 : user.role === 'MANAGER' ? 20 : 50;
     user.max_item_discount_percent = 100;
-    user.item_discount_mode = 'percent';
-    user.order_discount_mode = 'percent';
+    user.item_discount_mode = 'both';
+    user.order_discount_mode = 'both';
     const discountSetting = await query(
       `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
     );
@@ -710,12 +710,12 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         const key = user.role === 'DESKTOP_AGENT' ? 'desktop_agent' : user.role === 'MANAGER' ? 'manager' : 'admin';
         const value = Number(configured[key]);
         if (Number.isFinite(value) && value >= 0 && value <= 100) user.max_discount_percent = value;
-        if (configured.item_discount_mode === 'percent') {
+        if (configured.item_discount_mode !== 'amount') {
           const itemValue = Number(configured[key + '_item']);
           if (Number.isFinite(itemValue) && itemValue >= 0 && itemValue <= 100) user.max_item_discount_percent = itemValue;
         }
-        user.item_discount_mode = configured.item_discount_mode === 'amount' ? 'amount' : 'percent';
-        user.order_discount_mode = configured.order_discount_mode === 'amount' ? 'amount' : 'percent';
+        user.item_discount_mode = ['percent', 'amount', 'both'].includes(configured.item_discount_mode) ? configured.item_discount_mode : 'both';
+        user.order_discount_mode = ['percent', 'amount', 'both'].includes(configured.order_discount_mode) ? configured.order_discount_mode : 'both';
       } catch {
         // Retain the role default when the setting is malformed.
       }
