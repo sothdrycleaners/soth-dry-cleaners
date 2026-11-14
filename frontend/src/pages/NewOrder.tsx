@@ -256,7 +256,7 @@ export default function NewOrder() {
     setItemAdjModes(prev => ({ ...prev, [index]: mode }));
   };
   const getLineDiscountMode = (item: OrderItem): 'percent' | 'amount' =>
-    item.discount_mode === 'amount' ? 'amount' : 'percent';
+    item.discount_mode === 'percent' ? 'percent' : 'amount';
   const getLineSurchargeMode = (item: OrderItem): 'percent' | 'amount' =>
     item.surcharge_mode ?? getLineDiscountMode(item);
   const getItemInputMode = (index: number, item: OrderItem): 'percent' | 'amount' =>
@@ -291,8 +291,8 @@ export default function NewOrder() {
   const [standardKgRate, setStandardKgRate] = useState(10000);
   const [transactionDiscount, setTransactionDiscount] = useState(0);
   const [bargainAmount, setBargainAmount] = useState(0);
-  const [orderDiscountMode, setOrderDiscountMode] = useState<'percent' | 'amount'>('percent');
-  const [itemDiscountMode, setItemDiscountMode] = useState<'percent' | 'amount'>('percent');
+  const [orderDiscountMode, setOrderDiscountMode] = useState<'percent' | 'amount'>('amount');
+  const [itemDiscountMode, setItemDiscountMode] = useState<'percent' | 'amount'>('amount');
   const [allowedOrderDiscountMode, setAllowedOrderDiscountMode] = useState<'percent' | 'amount' | 'both'>('both');
   const [allowedItemDiscountMode, setAllowedItemDiscountMode] = useState<'percent' | 'amount' | 'both'>('both');
   const [orderSurchargeAmount, setOrderSurchargeAmount] = useState(0);
@@ -435,8 +435,8 @@ export default function NewOrder() {
       setAllowedOrderDiscountMode(configuredOrderMode);
       setFullItemAmountAllowed(response.data.user.full_item_bargain_allowed !== false);
       setFullOrderAmountAllowed(response.data.user.full_order_bargain_allowed !== false);
-      setItemDiscountMode(configuredItemMode === 'amount' ? 'amount' : 'percent');
-      setOrderDiscountMode(configuredOrderMode === 'amount' ? 'amount' : 'percent');
+      setItemDiscountMode(configuredItemMode === 'percent' ? 'percent' : 'amount');
+      setOrderDiscountMode(configuredOrderMode === 'percent' ? 'percent' : 'amount');
       const configuredDiscount = Number(response.data.user.max_discount_percent);
       setMaxDiscountPercent(Number.isFinite(configuredDiscount) && configuredDiscount >= 0
         ? configuredDiscount
@@ -1689,19 +1689,6 @@ export default function NewOrder() {
                           <div className="flex w-full max-w-24 shrink-0 overflow-hidden rounded-md border sm:w-auto">
                             <button
                               type="button"
-                              disabled={getItemInputMode(index, item) !== 'percent' && (getItemAdjMode(index) === 'priceup' ? Number(item.surcharge_amount || 0) > 0 : Number(item.discount_amount || 0) > 0)}
-                              aria-pressed={getItemInputMode(index, item) === 'percent'}
-                              onClick={() => canPriceUp && getItemAdjMode(index) === 'priceup'
-                                ? switchItemSurchargeMode(index, 'percent')
-                                : switchItemDiscountMode(index, 'percent')}
-                              title={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
-                              aria-label={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
-                              className={`flex-1 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${getItemInputMode(index, item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-                            >
-                              %
-                            </button>
-                            <button
-                              type="button"
                               disabled={getItemInputMode(index, item) !== 'amount' && (getItemAdjMode(index) === 'priceup' ? Number(item.surcharge_amount || 0) > 0 : Number(item.discount_amount || 0) > 0)}
                               aria-pressed={getItemInputMode(index, item) === 'amount'}
                               onClick={() => canPriceUp && getItemAdjMode(index) === 'priceup'
@@ -1709,9 +1696,22 @@ export default function NewOrder() {
                                 : switchItemDiscountMode(index, 'amount')}
                               title={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by fixed UGX' : 'Discount by fixed UGX amount'}
                               aria-label={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by fixed UGX' : 'Discount by fixed UGX amount'}
-                              className={`flex-1 border-l px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${getItemInputMode(index, item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              className={`flex-1 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${getItemInputMode(index, item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                             >
                               UGX
+                            </button>
+                            <button
+                              type="button"
+                              disabled={getItemInputMode(index, item) !== 'percent' && (getItemAdjMode(index) === 'priceup' ? Number(item.surcharge_amount || 0) > 0 : Number(item.discount_amount || 0) > 0)}
+                              aria-pressed={getItemInputMode(index, item) === 'percent'}
+                              onClick={() => canPriceUp && getItemAdjMode(index) === 'priceup'
+                                ? switchItemSurchargeMode(index, 'percent')
+                                : switchItemDiscountMode(index, 'percent')}
+                              title={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
+                              aria-label={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
+                              className={`flex-1 border-l px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${getItemInputMode(index, item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                            >
+                              %
                             </button>
                           </div>
                         )}
@@ -1862,21 +1862,6 @@ export default function NewOrder() {
                     <div className="flex overflow-hidden rounded-md border">
                       <button
                         type="button"
-                        disabled={(hasOrderBargain || hasOrderPriceUp) && orderDiscountMode !== 'percent'}
-                        aria-pressed={orderDiscountMode === 'percent'}
-                        onClick={() => {
-                          if (orderDiscountMode === 'percent') return;
-                          setOrderDiscountMode('percent');
-                          setTransactionDiscount(0);
-                          setBargainAmount(0);
-                          setOrderSurchargeAmount(0);
-                        }}
-                        className={`px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-                      >
-                        Percentage
-                      </button>
-                      <button
-                        type="button"
                         disabled={(hasOrderBargain || hasOrderPriceUp) && orderDiscountMode !== 'amount'}
                         aria-pressed={orderDiscountMode === 'amount'}
                         onClick={() => {
@@ -1886,9 +1871,24 @@ export default function NewOrder() {
                           setBargainAmount(0);
                           setOrderSurchargeAmount(0);
                         }}
-                        className={`border-l px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                        className={`px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                       >
                         Fixed UGX
+                      </button>
+                      <button
+                        type="button"
+                        disabled={(hasOrderBargain || hasOrderPriceUp) && orderDiscountMode !== 'percent'}
+                        aria-pressed={orderDiscountMode === 'percent'}
+                        onClick={() => {
+                          if (orderDiscountMode === 'percent') return;
+                          setOrderDiscountMode('percent');
+                          setTransactionDiscount(0);
+                          setBargainAmount(0);
+                          setOrderSurchargeAmount(0);
+                        }}
+                        className={`border-l px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                      >
+                        Percentage
                       </button>
                     </div>
                   </div>
