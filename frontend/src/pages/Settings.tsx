@@ -162,6 +162,12 @@ export default function Settings() {
   const [desktopAgentItemLimit, setDesktopAgentItemLimit] = useState('1000');
   const [managerItemLimit, setManagerItemLimit] = useState('2000');
   const [adminItemLimit, setAdminItemLimit] = useState('10000');
+  const [desktopAgentFullOrderAmount, setDesktopAgentFullOrderAmount] = useState(true);
+  const [managerFullOrderAmount, setManagerFullOrderAmount] = useState(true);
+  const [adminFullOrderAmount, setAdminFullOrderAmount] = useState(true);
+  const [desktopAgentFullItemAmount, setDesktopAgentFullItemAmount] = useState(true);
+  const [managerFullItemAmount, setManagerFullItemAmount] = useState(true);
+  const [adminFullItemAmount, setAdminFullItemAmount] = useState(true);
   const [desktopAgentDiscountPercent, setDesktopAgentDiscountPercent] = useState('10');
   const [managerDiscountPercent, setManagerDiscountPercent] = useState('20');
   const [adminDiscountPercent, setAdminDiscountPercent] = useState('50');
@@ -398,6 +404,12 @@ export default function Settings() {
       setDesktopAgentItemLimit(toLimit(response.data.desktop_agent_per_item, 1000));
       setManagerItemLimit(toLimit(response.data.manager_per_item, 2000));
       setAdminItemLimit(toLimit(response.data.admin_per_item, 10000));
+      setDesktopAgentFullOrderAmount(response.data.desktop_agent_full_order_amount !== false);
+      setManagerFullOrderAmount(response.data.manager_full_order_amount !== false);
+      setAdminFullOrderAmount(response.data.admin_full_order_amount !== false);
+      setDesktopAgentFullItemAmount(response.data.desktop_agent_full_item_amount !== false);
+      setManagerFullItemAmount(response.data.manager_full_item_amount !== false);
+      setAdminFullItemAmount(response.data.admin_full_item_amount !== false);
       setDesktopAgentDiscountPercent(toLimit(response.data.desktop_agent_discount_percent, 10));
       setManagerDiscountPercent(toLimit(response.data.manager_discount_percent, 20));
       setAdminDiscountPercent(toLimit(response.data.admin_discount_percent, 50));
@@ -691,6 +703,33 @@ export default function Settings() {
   };
 
   // Save bargain limits for all roles
+  const restoreBargainLimitDefaults = () => {
+    setDesktopAgentBargainLimit('5000');
+    setManagerBargainLimit('10000');
+    setAdminBargainLimit('50000');
+    setDesktopAgentItemLimit('1000');
+    setManagerItemLimit('2000');
+    setAdminItemLimit('10000');
+    setDesktopAgentFullOrderAmount(true);
+    setManagerFullOrderAmount(true);
+    setAdminFullOrderAmount(true);
+    setDesktopAgentFullItemAmount(true);
+    setManagerFullItemAmount(true);
+    setAdminFullItemAmount(true);
+    setDesktopAgentDiscountPercent('10');
+    setManagerDiscountPercent('20');
+    setAdminDiscountPercent('50');
+    setDesktopAgentItemDiscountPercent('100');
+    setManagerItemDiscountPercent('100');
+    setAdminItemDiscountPercent('100');
+    setItemDiscountMode('both');
+    setOrderDiscountMode('both');
+    toast({
+      title: 'Default bargain limits restored',
+      description: 'Review the defaults, then click Save Bargain Limits to apply them.',
+    });
+  };
+
   const saveBargainLimits = async () => {
     const parseLimit = (value: string): number | null => {
       const normalized = String(value ?? '').replace(/,/g, '').trim();
@@ -745,6 +784,12 @@ export default function Settings() {
           desktop_agent_item_limit: desktopAgentItem,
           manager_item_limit:       managerItem,
           admin_item_limit:         adminItem,
+          desktop_agent_full_order_amount: desktopAgentFullOrderAmount,
+          manager_full_order_amount: managerFullOrderAmount,
+          admin_full_order_amount: adminFullOrderAmount,
+          desktop_agent_full_item_amount: desktopAgentFullItemAmount,
+          manager_full_item_amount: managerFullItemAmount,
+          admin_full_item_amount: adminFullItemAmount,
           desktop_agent_discount_percent: desktopAgentDiscount,
           manager_discount_percent: managerDiscount,
           admin_discount_percent: adminDiscount,
@@ -775,13 +820,13 @@ export default function Settings() {
       const perItemSummary = itemDiscountMode === 'percent'
         ? `Per item: desktop agent ${desktopAgentItemDiscount}%, manager ${managerItemDiscount}%, administrator ${adminItemDiscount}%.`
         : itemDiscountMode === 'amount'
-          ? `Per item: desktop agent ${desktopAgentItem.toLocaleString()} UGX, manager ${managerItem.toLocaleString()} UGX, administrator ${adminItem.toLocaleString()} UGX.`
-          : `Per item: staff can choose percentage (up to ${desktopAgentItemDiscount}% / ${managerItemDiscount}% / ${adminItemDiscount}%) or fixed UGX (up to ${desktopAgentItem.toLocaleString()} / ${managerItem.toLocaleString()} / ${adminItem.toLocaleString()}).`;
+          ? `Per item: fixed UGX limits ${desktopAgentFullItemAmount ? 'full item value' : `${desktopAgentItem.toLocaleString()} UGX`} / ${managerFullItemAmount ? 'full item value' : `${managerItem.toLocaleString()} UGX`} / ${adminFullItemAmount ? 'full item value' : `${adminItem.toLocaleString()} UGX`}.`
+          : `Per item: staff can choose percentage (up to ${desktopAgentItemDiscount}% / ${managerItemDiscount}% / ${adminItemDiscount}%) or fixed UGX (full item value or custom role cap).`;
       const wholeOrderSummary = orderDiscountMode === 'percent'
         ? `Whole order: desktop agent ${desktopAgentDiscount}%, manager ${managerDiscount}%, administrator ${adminDiscount}%.`
         : orderDiscountMode === 'amount'
-          ? `Whole order: desktop agent ${desktopAgent.toLocaleString()} UGX, manager ${manager.toLocaleString()} UGX, administrator ${admin.toLocaleString()} UGX.`
-          : `Whole order: staff can choose percentage (up to ${desktopAgentDiscount}% / ${managerDiscount}% / ${adminDiscount}%) or fixed UGX (up to ${desktopAgent.toLocaleString()} / ${manager.toLocaleString()} / ${admin.toLocaleString()}).`;
+          ? `Whole order: fixed UGX limits ${desktopAgentFullOrderAmount ? 'full amount due' : `${desktopAgent.toLocaleString()} UGX`} / ${managerFullOrderAmount ? 'full amount due' : `${manager.toLocaleString()} UGX`} / ${adminFullOrderAmount ? 'full amount due' : `${admin.toLocaleString()} UGX`}.`
+          : `Whole order: staff can choose percentage (up to ${desktopAgentDiscount}% / ${managerDiscount}% / ${adminDiscount}%) or fixed UGX (full amount due or custom role cap).`;
 
       toast({
         title: 'Bargain limits saved',
@@ -2477,18 +2522,23 @@ Don't miss out! ✨`;
               {/* Overall limits */}
               {orderDiscountMode !== 'percent' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Overall Order Bargain Limit (UGX)</h3>
-                <p className="text-xs text-muted-foreground">Maximum fixed UGX bargain a staff member may apply to the whole order. Per-item discounts are controlled separately.</p>
+                <p className="text-xs text-muted-foreground">Set a fixed UGX cap per role, or allow a discount up to the current amount due. Full-value discounts can make an order free, but never exceed its amount due.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { id: 'da-overall', label: 'Desktop Agent', value: desktopAgentBargainLimit, set: setDesktopAgentBargainLimit, placeholder: '5000' },
-                    { id: 'mgr-overall', label: 'Manager', value: managerBargainLimit, set: setManagerBargainLimit, placeholder: '10000' },
-                    { id: 'adm-overall', label: 'Administrator', value: adminBargainLimit, set: setAdminBargainLimit, placeholder: '50000' },
-                  ].map(({ id, label, value, set, placeholder }) => (
+                    { id: 'da-overall', label: 'Desktop Agent', value: desktopAgentBargainLimit, set: setDesktopAgentBargainLimit, full: desktopAgentFullOrderAmount, setFull: setDesktopAgentFullOrderAmount, placeholder: '5000' },
+                    { id: 'mgr-overall', label: 'Manager', value: managerBargainLimit, set: setManagerBargainLimit, full: managerFullOrderAmount, setFull: setManagerFullOrderAmount, placeholder: '10000' },
+                    { id: 'adm-overall', label: 'Administrator', value: adminBargainLimit, set: setAdminBargainLimit, full: adminFullOrderAmount, setFull: setAdminFullOrderAmount, placeholder: '50000' },
+                  ].map(({ id, label, value, set, full, setFull, placeholder }) => (
                     <div key={id}>
                       <Label htmlFor={id}>{label}</Label>
                       <Input id={id} type="number" inputMode="numeric" min="0" step="1000"
+                        disabled={full}
                         value={value} onChange={(e) => set(e.target.value)} onFocus={(e) => e.target.select()}
                         placeholder={placeholder} className="mt-2" />
+                      <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+                        <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="mt-0.5" />
+                        <span>Allow up to the full amount due</span>
+                      </label>
                     </div>
                   ))}
                 </div>
@@ -2497,18 +2547,23 @@ Don't miss out! ✨`;
               {/* Per-item limits */}
               {itemDiscountMode !== 'percent' && <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Bargain Limit (UGX)</h3>
-                <p className="text-xs text-muted-foreground">Maximum fixed UGX bargain a staff member may apply to a single item line. This ceiling is independent of the whole-order limit.</p>
+                <p className="text-xs text-muted-foreground">Set a fixed UGX cap per role, or allow a discount up to the current item-line value. Full-value discounts can make an item free, but never exceed its value.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { id: 'da-item', label: 'Desktop Agent', value: desktopAgentItemLimit, set: setDesktopAgentItemLimit, placeholder: '1000' },
-                    { id: 'mgr-item', label: 'Manager', value: managerItemLimit, set: setManagerItemLimit, placeholder: '2000' },
-                    { id: 'adm-item', label: 'Administrator', value: adminItemLimit, set: setAdminItemLimit, placeholder: '10000' },
-                  ].map(({ id, label, value, set, placeholder }) => (
+                    { id: 'da-item', label: 'Desktop Agent', value: desktopAgentItemLimit, set: setDesktopAgentItemLimit, full: desktopAgentFullItemAmount, setFull: setDesktopAgentFullItemAmount, placeholder: '1000' },
+                    { id: 'mgr-item', label: 'Manager', value: managerItemLimit, set: setManagerItemLimit, full: managerFullItemAmount, setFull: setManagerFullItemAmount, placeholder: '2000' },
+                    { id: 'adm-item', label: 'Administrator', value: adminItemLimit, set: setAdminItemLimit, full: adminFullItemAmount, setFull: setAdminFullItemAmount, placeholder: '10000' },
+                  ].map(({ id, label, value, set, full, setFull, placeholder }) => (
                     <div key={id}>
                       <Label htmlFor={id}>{label}</Label>
                       <Input id={id} type="number" inputMode="numeric" min="0" step="500"
+                        disabled={full}
                         value={value} onChange={(e) => set(e.target.value)} onFocus={(e) => e.target.select()}
                         placeholder={placeholder} className="mt-2" />
+                      <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+                        <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="mt-0.5" />
+                        <span>Allow up to the full item value</span>
+                      </label>
                     </div>
                   ))}
                 </div>
@@ -2601,6 +2656,14 @@ Don't miss out! ✨`;
               </AlertDescription>
             </Alert>
 
+            <Button
+              onClick={restoreBargainLimitDefaults}
+              disabled={savingBargainLimits}
+              variant="outline"
+              className="w-full sm:w-auto"
+            >
+              Restore Defaults
+            </Button>
             <Button
               onClick={saveBargainLimits}
               disabled={savingBargainLimits}

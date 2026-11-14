@@ -701,6 +701,8 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     user.max_item_discount_percent = 100;
     user.item_discount_mode = 'both';
     user.order_discount_mode = 'both';
+    user.full_item_bargain_allowed = true;
+    user.full_order_bargain_allowed = true;
     const discountSetting = await query(
       `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
     );
@@ -708,6 +710,14 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       try {
         const configured = JSON.parse(discountSetting.rows[0].setting_value);
         const key = user.role === 'DESKTOP_AGENT' ? 'desktop_agent' : user.role === 'MANAGER' ? 'manager' : 'admin';
+        const configuredOrderAmount = Number(configured[key + '_limit']);
+        const configuredItemAmount = Number(configured[key + '_item_limit']);
+        if (configured[key + '_full_order_amount'] === false && Number.isFinite(configuredOrderAmount) && configuredOrderAmount >= 0) {
+          user.max_bargain_amount = configuredOrderAmount;
+        }
+        if (configured[key + '_full_item_amount'] === false && Number.isFinite(configuredItemAmount) && configuredItemAmount >= 0) {
+          user.max_item_bargain_amount = configuredItemAmount;
+        }
         const value = Number(configured[key]);
         if (Number.isFinite(value) && value >= 0 && value <= 100) user.max_discount_percent = value;
         if (configured.item_discount_mode !== 'amount') {
@@ -716,6 +726,8 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         }
         user.item_discount_mode = ['percent', 'amount', 'both'].includes(configured.item_discount_mode) ? configured.item_discount_mode : 'both';
         user.order_discount_mode = ['percent', 'amount', 'both'].includes(configured.order_discount_mode) ? configured.order_discount_mode : 'both';
+        user.full_item_bargain_allowed = configured[key + '_full_item_amount'] !== false;
+        user.full_order_bargain_allowed = configured[key + '_full_order_amount'] !== false;
       } catch {
         // Retain the role default when the setting is malformed.
       }

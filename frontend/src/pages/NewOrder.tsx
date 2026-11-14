@@ -284,6 +284,8 @@ export default function NewOrder() {
   const [orderSurchargeAmount, setOrderSurchargeAmount] = useState(0);
   const [maxBargainAmount, setMaxBargainAmount] = useState(0);
   const [maxItemBargainAmount, setMaxItemBargainAmount] = useState(0);
+  const [fullOrderAmountAllowed, setFullOrderAmountAllowed] = useState(true);
+  const [fullItemAmountAllowed, setFullItemAmountAllowed] = useState(true);
   const [maxDiscountPercent, setMaxDiscountPercent] = useState(defaultMaxDiscountPercent);
   const [maxItemDiscountPercent, setMaxItemDiscountPercent] = useState(100);
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'UNPAID' | 'PARTIAL'>('UNPAID');
@@ -417,6 +419,8 @@ export default function NewOrder() {
         : 'both';
       setAllowedItemDiscountMode(configuredItemMode);
       setAllowedOrderDiscountMode(configuredOrderMode);
+      setFullItemAmountAllowed(response.data.user.full_item_bargain_allowed !== false);
+      setFullOrderAmountAllowed(response.data.user.full_order_bargain_allowed !== false);
       setItemDiscountMode(configuredItemMode === 'amount' ? 'amount' : 'percent');
       setOrderDiscountMode(configuredOrderMode === 'amount' ? 'amount' : 'percent');
       const configuredDiscount = Number(response.data.user.max_discount_percent);
@@ -431,6 +435,8 @@ export default function NewOrder() {
       console.error('Error fetching user bargain limit:', error);
       setMaxBargainAmount(0);
       setMaxItemBargainAmount(0);
+      setFullOrderAmountAllowed(true);
+      setFullItemAmountAllowed(true);
       setMaxDiscountPercent(defaultMaxDiscountPercent);
       setMaxItemDiscountPercent(100);
     }
@@ -689,7 +695,9 @@ export default function NewOrder() {
 
     const gross = Math.round(Number(current.quantity) * Number(current.unit_price));
     const roleCeiling = Math.round(gross * (maxDiscountPercent / 100));
-    const configuredCeiling = maxItemBargainAmount > 0 ? maxItemBargainAmount : roleCeiling;
+    const configuredCeiling = fullItemAmountAllowed
+      ? gross
+      : maxItemBargainAmount;
     const parsed = Math.max(0, Math.round(Number(rawValue) || 0));
     const shouldScale = Number(current.quantity) === 1;
     const discount = Math.min(parsed, configuredCeiling, gross);
@@ -698,7 +706,9 @@ export default function NewOrder() {
       toast({
         variant: 'destructive',
         title: 'Discount limit reached',
-        description: maxItemBargainAmount > 0
+        description: fullItemAmountAllowed
+          ? `The discount cannot exceed this line's full value (${formatUGX(gross)}).`
+          : maxItemBargainAmount > 0
           ? `Your configured per-item limit is ${formatUGX(maxItemBargainAmount)} per line.`
           : `Your role allows up to ${maxDiscountPercent}% on this line (${formatUGX(roleCeiling)} here).`,
       });
@@ -830,7 +840,9 @@ export default function NewOrder() {
   const discountAmount = orderDiscountMode === 'percent'
     ? Math.round((itemsSubtotal * transactionDiscount) / 100)
     : 0;
-  const bargainLimitRemaining = maxBargainAmount;
+  const bargainLimitRemaining = fullOrderAmountAllowed
+    ? Math.max(0, itemsSubtotal - discountAmount)
+    : maxBargainAmount;
   const safeBargain = Math.min(
     orderDiscountMode === 'amount' ? Math.max(0, Math.round(bargainAmount)) : 0,
     Math.max(0, itemsSubtotal - discountAmount),
@@ -1656,7 +1668,9 @@ export default function NewOrder() {
                               ? 'Price-up per unit for stains or special treatment; multiplies with quantity.'
                               : getLineDiscountMode(item) === 'percent'
                                 ? `Percentage discount on this line, up to ${maxItemDiscountPercent}%. It recalculates with quantity.`
-                                : `Fixed bargain per unit; multiplies with quantity. Limit: ${maxItemBargainAmount > 0 ? formatUGX(maxItemBargainAmount) : 'no separate amount limit'}`
+                                : fullItemAmountAllowed
+                                  ? 'Fixed UGX bargain per unit; capped at the full value of this item line.'
+                                  : `Fixed bargain per unit; configured limit: ${formatUGX(maxItemBargainAmount)}`
                           }
                         />
                         {/* Show the sign badge when amount > 0 */}
@@ -1812,7 +1826,7 @@ export default function NewOrder() {
                 </div>}
                 {orderDiscountMode === 'amount' && <div>
                   <Label className="text-xs text-muted-foreground">
-                    Whole-order bargain (UGX) <span className="text-muted-foreground/70">(admin-set mode; max {formatUGX(maxBargainAmount)})</span>
+                    Whole-order bargain (UGX) <span className="text-muted-foreground/70">(max {formatUGX(bargainLimitRemaining)}{fullOrderAmountAllowed ? ' full amount due' : ' admin-set cap'})</span>
                   </Label>
                   <Input
                     type="number"

@@ -9,7 +9,7 @@ import { sendOrderConfirmation } from '../services/whatsapp.service';
 import { sendOrderReady } from '../services/whatsapp.service';
 import { generateOrderReceiptPDF } from '../services/pdf.service';
 import { logCreate, logUpdate, logDelete } from '../utils/activityLogger';
-import { getEffectiveBargainLimit, getMaxDiscountForRole } from '../utils/roleLimits';
+import { getMaxDiscountForRole } from '../utils/roleLimits';
 import { resolveListBranchId, forbiddenIfOutsideBranch } from '../utils/branchScope';
 import { notifyAdministrators } from './notifications.controller';
 import { calendarDateToTimestamp, extractYmd, kampalaTodayYmd, toKampalaYmd, ymdToPgTimestamp } from '../utils/businessDate';
@@ -561,6 +561,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     const roleKey = req.user!.role === 'DESKTOP_AGENT' ? 'desktop_agent'
       : req.user!.role === 'MANAGER' ? 'manager' : 'admin';
     const defaultItemDiscountPercent = 100;
+    const fullItemAmountAllowed = configuredDiscountLimits[roleKey + '_full_item_amount'] !== false;
+    const fullOrderAmountAllowed = configuredDiscountLimits[roleKey + '_full_order_amount'] !== false;
     const configuredItemDiscountMode = ['percent', 'amount', 'both'].includes(String(configuredDiscountLimits.item_discount_mode))
       ? String(configuredDiscountLimits.item_discount_mode)
       : 'both';
@@ -715,7 +717,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const roleDiscountCeiling = Math.round(
         grossItemTotal * (getMaxDiscountForRole(req.user!.role) / 100)
       );
-      if (requestedItemDiscountPercent === null && requestedItemDiscount > roleDiscountCeiling) {
+      if (requestedItemDiscountPercent === null && !fullItemAmountAllowed && requestedItemDiscount > roleDiscountCeiling) {
         throw new Error(
           `Discount on ${priceItem.name} exceeds your limit (max ${getMaxDiscountForRole(req.user!.role)}% = ${roleDiscountCeiling})`
         );
@@ -794,21 +796,29 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     
     // Fetch user's maximum bargain limits (overall + per-item)
     const userResult = await client.query(
-      `SELECT max_bargain_amount, max_item_bargain_amount, role FROM users WHERE id = $1`,
+      `SELECT max_bargain_amount, max_item_bargain_amount FROM users WHERE id = $1`,
       [req.user!.id]
     );
 
     if (userResult.rows.length === 0) throw new Error('User not found');
 
-    const { role, max_bargain_amount, max_item_bargain_amount } = userResult.rows[0];
+    const { max_bargain_amount, max_item_bargain_amount } = userResult.rows[0];
 
-    // Admins are uncapped; all others obey the configured ceilings.
-    const maxOverall  = getEffectiveBargainLimit(role, max_bargain_amount);
-    const maxPerItem  = role === 'ADMIN' ? Number.MAX_SAFE_INTEGER
-                      : Math.max(0, Number(max_item_bargain_amount) || 0);
+    // Fixed-amount caps are configurable by role. Full-value permission is
+    // separately capped at the actual line/order amount below.
+    const configuredOverallLimit = Number(configuredDiscountLimits[roleKey + '_limit']);
+    const configuredPerItemLimit = Number(configuredDiscountLimits[roleKey + '_item_limit']);
+    const maxOverall = fullOrderAmountAllowed
+      ? Math.max(0, calculatedSubtotal)
+      : Number.isFinite(configuredOverallLimit) && configuredOverallLimit >= 0
+        ? configuredOverallLimit
+        : Math.max(0, Number(max_bargain_amount) || 0);
+    const maxPerItem = Number.isFinite(configuredPerItemLimit) && configuredPerItemLimit >= 0
+      ? configuredPerItemLimit
+      : Math.max(0, Number(max_item_bargain_amount) || 0);
 
     // Enforce per-item ceiling for every line that has a bargain
-    if (maxPerItem > 0) {
+    if (!fullItemAmountAllowed) {
       for (const item of validatedItems) {
         if (item.item_discount_percent !== null && item.item_discount_percent !== undefined) continue;
         const itemDiscount = Number(item.discount_amount || 0);

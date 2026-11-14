@@ -390,6 +390,8 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
     let discountLimits: Record<string, any> = {
       desktop_agent: 10, manager: 20, admin: 50,
       desktop_agent_item: 100, manager_item: 100, admin_item: 100,
+      desktop_agent_full_order_amount: true, manager_full_order_amount: true, admin_full_order_amount: true,
+      desktop_agent_full_item_amount: true, manager_full_item_amount: true, admin_full_item_amount: true,
       item_discount_mode: 'both', order_discount_mode: 'both',
     };
     if (discountResult.rows[0]?.setting_value) {
@@ -422,6 +424,12 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
       desktop_agent_item_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent_item)) ? Number(discountLimits.desktop_agent_item) : 100,
       manager_item_discount_percent: Number.isFinite(Number(discountLimits.manager_item)) ? Number(discountLimits.manager_item) : 100,
       admin_item_discount_percent: Number.isFinite(Number(discountLimits.admin_item)) ? Number(discountLimits.admin_item) : 100,
+      desktop_agent_full_order_amount: discountLimits.desktop_agent_full_order_amount !== false,
+      manager_full_order_amount: discountLimits.manager_full_order_amount !== false,
+      admin_full_order_amount: discountLimits.admin_full_order_amount !== false,
+      desktop_agent_full_item_amount: discountLimits.desktop_agent_full_item_amount !== false,
+      manager_full_item_amount: discountLimits.manager_full_item_amount !== false,
+      admin_full_item_amount: discountLimits.admin_full_item_amount !== false,
       item_discount_mode: ['percent', 'amount', 'both'].includes(discountLimits.item_discount_mode) ? discountLimits.item_discount_mode : 'both',
       order_discount_mode: ['percent', 'amount', 'both'].includes(discountLimits.order_discount_mode) ? discountLimits.order_discount_mode : 'both',
     });
@@ -438,6 +446,8 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
       desktop_agent_item_limit,  manager_item_limit,  admin_item_limit,
       desktop_agent_discount_percent, manager_discount_percent, admin_discount_percent,
       desktop_agent_item_discount_percent, manager_item_discount_percent, admin_item_discount_percent,
+      desktop_agent_full_order_amount, manager_full_order_amount, admin_full_order_amount,
+      desktop_agent_full_item_amount, manager_full_item_amount, admin_full_item_amount,
       item_discount_mode, order_discount_mode,
     } = req.body;
 
@@ -491,6 +501,13 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
     if (!['percent', 'amount', 'both'].includes(item_discount_mode) || !['percent', 'amount', 'both'].includes(order_discount_mode)) {
       return res.status(400).json({ error: 'Choose percentage, fixed UGX, or both for each discount mode' });
     }
+    const fullAmountFlags = [
+      desktop_agent_full_order_amount, manager_full_order_amount, admin_full_order_amount,
+      desktop_agent_full_item_amount, manager_full_item_amount, admin_full_item_amount,
+    ];
+    if (fullAmountFlags.some((flag) => flag !== undefined && typeof flag !== 'boolean')) {
+      return res.status(400).json({ error: 'Full-value bargain options must be true or false' });
+    }
     if (managerDiscount < desktopAgentDiscount || adminDiscount < managerDiscount) {
       return res.status(400).json({ error: 'Order discount percentages must follow Desktop Agent <= Manager <= Administrator' });
     }
@@ -521,6 +538,18 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
         desktop_agent_item: desktopAgentItemDiscount,
         manager_item: managerItemDiscount,
         admin_item: adminItemDiscount,
+        desktop_agent_limit: desktopAgent,
+        manager_limit: manager,
+        admin_limit: admin ?? 50000,
+        desktop_agent_item_limit: desktopAgentItem,
+        manager_item_limit: managerItem,
+        admin_item_limit: adminItem ?? 10000,
+        desktop_agent_full_order_amount: desktop_agent_full_order_amount !== false,
+        manager_full_order_amount: manager_full_order_amount !== false,
+        admin_full_order_amount: admin_full_order_amount !== false,
+        desktop_agent_full_item_amount: desktop_agent_full_item_amount !== false,
+        manager_full_item_amount: manager_full_item_amount !== false,
+        admin_full_item_amount: admin_full_item_amount !== false,
         item_discount_mode,
         order_discount_mode,
       })]
