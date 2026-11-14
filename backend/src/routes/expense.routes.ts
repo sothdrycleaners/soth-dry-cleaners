@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { body } from 'express-validator';
+import { body, param } from 'express-validator';
 import { authenticate, requireAdmin, requireDesktopWorkspaceAccess } from '../middleware/auth';
 import {
   recordExpense,
@@ -9,6 +9,9 @@ import {
   approveExpense,
   deleteExpense,
   getExpenseCategories,
+  createExpenseCategory,
+  updateExpenseCategory,
+  deleteExpenseCategory,
   getExpenseStatistics,
 } from '../controllers/expense.controller';
 
@@ -50,6 +53,38 @@ router.get('/', getAllExpenses as any);
  * @access  Authenticated users
  */
 router.get('/categories', getExpenseCategories as any);
+
+router.post(
+  '/categories',
+  requireAdmin as any,
+  [
+    body('name').trim().notEmpty().withMessage('Category name is required').isLength({ max: 100 }).withMessage('Category name must be 100 characters or fewer'),
+    body('description').optional().isString().isLength({ max: 500 }).withMessage('Description must be 500 characters or fewer'),
+    body('color').optional().matches(/^#[0-9a-fA-F]{6}$/).withMessage('Choose a valid category color'),
+    body('is_active').optional().isBoolean().withMessage('Category status must be active or inactive'),
+  ],
+  createExpenseCategory as any
+);
+
+router.put(
+  '/categories/:id',
+  requireAdmin as any,
+  [
+    param('id').isInt({ min: 1 }).withMessage('Invalid category'),
+    body('name').trim().notEmpty().withMessage('Category name is required').isLength({ max: 100 }).withMessage('Category name must be 100 characters or fewer'),
+    body('description').optional().isString().isLength({ max: 500 }).withMessage('Description must be 500 characters or fewer'),
+    body('color').optional().matches(/^#[0-9a-fA-F]{6}$/).withMessage('Choose a valid category color'),
+    body('is_active').optional().isBoolean().withMessage('Category status must be active or inactive'),
+  ],
+  updateExpenseCategory as any
+);
+
+router.delete(
+  '/categories/:id',
+  requireAdmin as any,
+  [param('id').isInt({ min: 1 }).withMessage('Invalid category')],
+  deleteExpenseCategory as any
+);
 
 /**
  * @route   GET /api/expenses/statistics

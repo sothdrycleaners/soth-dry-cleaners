@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { validationResult } from 'express-validator';
-import { query } from '../config/database';
+import { beginTenantTransaction, getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { resolveWriteBranchId, resolveListBranchId } from '../utils/branchScope';
 
@@ -65,6 +65,15 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Choose an active branch for this expense.' });
     }
     const branchName = branchCheck.rows[0].name;
+
+    const categoryCheck = await query(
+      `SELECT id FROM expense_categories
+       WHERE tenant_id = $1 AND name = $2 AND is_active = TRUE`,
+      [req.user?.tenant_id, category]
+    );
+    if (!categoryCheck.rows.length) {
+      return res.status(400).json({ error: 'Choose an active expense category.' });
+    }
 
     const isAdminEntry = req.user?.role === 'ADMIN';
     const initialStatus = isAdminEntry ? 'APPROVED' : 'PENDING';
@@ -208,12 +217,13 @@ export const getAllExpenses = async (req: AuthRequest, res: Response) => {
       `SELECT 
         e.*,
         e.category as category_name,
-        '#3B82F6' as category_color,
+        COALESCE(ec.color, '#3B82F6') as category_color,
         u1.full_name as recorded_by_name,
         u2.full_name as approved_by_name,
         u3.full_name as rejected_by_name,
         b.name as branch_name
        FROM expenses e
+       LEFT JOIN expense_categories ec ON ec.tenant_id = e.tenant_id AND ec.name = e.category
        LEFT JOIN users u1 ON e.submitted_by = u1.id
        LEFT JOIN users u2 ON e.approved_by = u2.id
        LEFT JOIN users u3 ON e.rejected_by = u3.id
@@ -258,12 +268,13 @@ export const getExpenseById = async (req: AuthRequest, res: Response) => {
       `SELECT 
         e.*,
         e.category as category_name,
-        '#3B82F6' as category_color,
+        COALESCE(ec.color, '#3B82F6') as category_color,
         u1.full_name as recorded_by_name,
         u1.email as recorded_by_email,
         u2.full_name as approved_by_name,
         u3.full_name as rejected_by_name
        FROM expenses e
+       LEFT JOIN expense_categories ec ON ec.tenant_id = e.tenant_id AND ec.name = e.category
        LEFT JOIN users u1 ON e.submitted_by = u1.id
        LEFT JOIN users u2 ON e.approved_by = u2.id
        LEFT JOIN users u3 ON e.rejected_by = u3.id
@@ -531,20 +542,136 @@ export const deleteExpense = async (req: AuthRequest, res: Response) => {
  */
 export const getExpenseCategories = async (req: AuthRequest, res: Response) => {
   try {
-    const categories = [
-      { id: 1, name: 'Utilities', color: '#3B82F6', is_active: true },
-      { id: 2, name: 'Supplies', color: '#10B981', is_active: true },
-      { id: 3, name: 'Maintenance', color: '#F59E0B', is_active: true },
-      { id: 4, name: 'Transport', color: '#8B5CF6', is_active: true },
-      { id: 5, name: 'Office', color: '#EF4444', is_active: true },
-      { id: 6, name: 'Other', color: '#6B7280', is_active: true },
-    ];
-
-    res.json(categories);
-
+    const includeInactive = req.user?.role === 'ADMIN' && req.query.include_inactive === 'true';
+    const categories = await query(
+      `SELECT id, name, description, color, is_active
+       FROM expense_categories
+       WHERE tenant_id = $1 AND ($2::boolean OR is_active = TRUE)
+       ORDER BY is_active DESC, lower(name), id`,
+      [req.user?.tenant_id, includeInactive]
+    );
+    res.json(categories.rows);
   } catch (error) {
     console.error('Get expense categories error:', error);
     res.status(500).json({ error: 'Failed to get expense categories' });
+  }
+};
+
+export const createExpenseCategory = async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const { name, description = '', color = '#3B82F6' } = req.body;
+    const result = await query(
+      `INSERT INTO expense_categories (tenant_id, name, description, color, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, TRUE, NOW(), NOW())
+       RETURNING id, name, description, color, is_active`,
+      [req.user?.tenant_id, String(name).trim(), String(description).trim(), color]
+    );
+    res.status(201).json({ message: 'Expense category added', category: result.rows[0] });
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'A category with this name already exists.' });
+    }
+    console.error('Create expense category error:', error);
+    res.status(500).json({ error: 'Failed to add expense category' });
+  }
+};
+
+export const updateExpenseCategory = async (req: AuthRequest, res: Response) => {
+  const client = await getClient();
+  try {
+    await beginTenantTransaction(client);
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ errors: errors.array() });
+    }
+    const { id } = req.params;
+    const { name, description = '', color = '#3B82F6' } = req.body;
+    const existing = await client.query(
+      'SELECT id, name FROM expense_categories WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      [id, req.user?.tenant_id]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Expense category not found.' });
+    }
+
+    const oldName = existing.rows[0].name as string;
+    const updated = await client.query(
+      `UPDATE expense_categories
+       SET name = $1, description = $2, color = $3,
+           is_active = COALESCE($4, is_active), updated_at = NOW()
+       WHERE id = $5 AND tenant_id = $6
+       RETURNING id, name, description, color, is_active`,
+      [String(name).trim(), String(description).trim(), color, req.body.is_active, id, req.user?.tenant_id]
+    );
+    if (oldName !== String(name).trim()) {
+      await client.query(
+        'UPDATE expenses SET category = $1 WHERE tenant_id = $2 AND category = $3',
+        [String(name).trim(), req.user?.tenant_id, oldName]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ message: 'Expense category updated', category: updated.rows[0] });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* transaction may already be closed */ }
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'A category with this name already exists.' });
+    }
+    console.error('Update expense category error:', error);
+    res.status(500).json({ error: 'Failed to update expense category' });
+  } finally {
+    client.release();
+  }
+};
+
+export const deleteExpenseCategory = async (req: AuthRequest, res: Response) => {
+  const client = await getClient();
+  try {
+    await beginTenantTransaction(client);
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ errors: errors.array() });
+    }
+    const { id } = req.params;
+    const existing = await client.query(
+      'SELECT id, name FROM expense_categories WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      [id, req.user?.tenant_id]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Expense category not found.' });
+    }
+
+    const usage = await client.query(
+      'SELECT COUNT(*)::int AS count FROM expenses WHERE tenant_id = $1 AND (category = $2 OR category_id = $3)',
+      [req.user?.tenant_id, existing.rows[0].name, id]
+    );
+    const hasHistory = Number(usage.rows[0].count) > 0;
+    if (hasHistory) {
+      await client.query(
+        'UPDATE expense_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND tenant_id = $2',
+        [id, req.user?.tenant_id]
+      );
+    } else {
+      await client.query('DELETE FROM expense_categories WHERE id = $1 AND tenant_id = $2', [id, req.user?.tenant_id]);
+    }
+    await client.query('COMMIT');
+    res.json({
+      message: hasHistory
+        ? 'Category archived to preserve existing expense history.'
+        : 'Expense category deleted.',
+      archived: hasHistory,
+    });
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch { /* transaction may already be closed */ }
+    console.error('Delete expense category error:', error);
+    res.status(500).json({ error: 'Failed to delete expense category' });
+  } finally {
+    client.release();
   }
 };
 

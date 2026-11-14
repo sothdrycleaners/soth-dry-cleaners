@@ -17,6 +17,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -55,6 +65,7 @@ interface Category {
   name: string;
   description: string;
   color: string;
+  is_active: boolean;
 }
 
 // Helpers for timezone-safe YYYY-MM and YYYY-MM-DD strings
@@ -117,6 +128,13 @@ const Expenses = () => {
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [managedCategories, setManagedCategories] = useState<Category[]>([]);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [categoryDraft, setCategoryDraft] = useState({ name: '', description: '', color: '#3B82F6' });
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+  const [categoryDeleting, setCategoryDeleting] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
@@ -222,11 +240,91 @@ const Expenses = () => {
       const response = await axios.get(`${API_BASE_URL}/expenses/categories`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setCategories(response.data || []);
+      setCategories((response.data || []).filter((category: Category) => category.is_active));
     } catch (error) {
       console.error('Failed to fetch categories:', error);
     }
   }, [token]);
+
+  const fetchManagedCategories = useCallback(async () => {
+    if (!token || !isAdmin) return;
+    try {
+      const response = await axios.get(`${API_BASE_URL}/expenses/categories?include_inactive=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setManagedCategories(response.data || []);
+    } catch (error) {
+      console.error('Failed to fetch expense categories for management:', error);
+      toast.error('Could not load expense categories');
+    }
+  }, [isAdmin, token]);
+
+  const resetCategoryDraft = () => {
+    setEditingCategory(null);
+    setCategoryDraft({ name: '', description: '', color: '#3B82F6' });
+  };
+
+  const handleCategorySave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!token || !categoryDraft.name.trim() || categorySaving) return;
+    try {
+      setCategorySaving(true);
+      const payload = { ...categoryDraft, name: categoryDraft.name.trim(), description: categoryDraft.description.trim() };
+      const response = editingCategory
+        ? await axios.put(`${API_BASE_URL}/expenses/categories/${editingCategory.id}`, payload, { headers: { Authorization: `Bearer ${token}` } })
+        : await axios.post(`${API_BASE_URL}/expenses/categories`, payload, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(response.data.message || (editingCategory ? 'Category updated' : 'Category added'));
+      resetCategoryDraft();
+      await Promise.all([fetchCategories(), fetchManagedCategories()]);
+    } catch (error: unknown) {
+      const message = axios.isAxiosError(error) ? error.response?.data?.error : undefined;
+      toast.error(message || 'Could not save expense category');
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleCategoryDelete = async () => {
+    if (!token || !categoryToDelete || categoryDeleting) return;
+    try {
+      setCategoryDeleting(true);
+      const response = await axios.delete(`${API_BASE_URL}/expenses/categories/${categoryToDelete.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success(response.data.message || 'Category removed');
+      if (filters.category === categoryToDelete.name) {
+        setFilters((current) => ({ ...current, category: '' }));
+      }
+      setCategoryToDelete(null);
+      resetCategoryDraft();
+      await Promise.all([fetchCategories(), fetchManagedCategories()]);
+    } catch (error: unknown) {
+      const message = axios.isAxiosError(error) ? error.response?.data?.error : undefined;
+      toast.error(message || 'Could not remove expense category');
+    } finally {
+      setCategoryDeleting(false);
+    }
+  };
+
+  const handleRestoreCategory = async (category: Category) => {
+    if (!token || categorySaving) return;
+    try {
+      setCategorySaving(true);
+      await axios.put(`${API_BASE_URL}/expenses/categories/${category.id}`, {
+        name: category.name,
+        description: category.description || '',
+        color: category.color || '#3B82F6',
+        is_active: true,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(`${category.name} is available for new expenses again`);
+      await Promise.all([fetchCategories(), fetchManagedCategories()]);
+    } catch (error: unknown) {
+      const message = axios.isAxiosError(error) ? error.response?.data?.error : undefined;
+      toast.error(message || 'Could not restore expense category');
+    } finally {
+      setCategorySaving(false);
+    }
+  };
 
   const fetchMonthlyStats = useCallback(async () => {
     if (!token) return;
@@ -512,6 +610,20 @@ const Expenses = () => {
             onClick={() => { setDatePreset('custom'); setCurrentPage(1); }}>Custom dates</Button>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {isAdmin && (
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2 w-full sm:w-auto"
+              onClick={() => {
+                setShowCategoryManager(true);
+                void fetchManagedCategories();
+              }}
+            >
+              <Pencil className="w-4 h-4" />
+              Manage Categories
+            </Button>
+          )}
           <Button variant="outline" disabled={exportingReport} onClick={() => void createExpensesPdf(false)} className="gap-2">
             {exportingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
             Export filtered PDF
@@ -973,6 +1085,147 @@ const Expenses = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Administrator-only expense category management */}
+      <Dialog
+        open={showCategoryManager}
+        onOpenChange={(open) => {
+          setShowCategoryManager(open);
+          if (!open) resetCategoryDraft();
+        }}
+      >
+        <DialogContent className="max-w-[95vw] sm:max-w-xl max-h-[90dvh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Manage Expense Categories</DialogTitle>
+            <DialogDescription>
+              Active categories are available to staff when recording expenses. Categories with expense history are archived on deletion so past records remain intact.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCategorySave} className="space-y-3 rounded-lg border p-3">
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <div className="space-y-1.5">
+                <Label htmlFor="expense-category-name">Category name *</Label>
+                <Input
+                  id="expense-category-name"
+                  value={categoryDraft.name}
+                  maxLength={100}
+                  onChange={(event) => setCategoryDraft((draft) => ({ ...draft, name: event.target.value }))}
+                  placeholder="e.g. Equipment servicing"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="expense-category-color">Color</Label>
+                <Input
+                  id="expense-category-color"
+                  type="color"
+                  value={categoryDraft.color}
+                  onChange={(event) => setCategoryDraft((draft) => ({ ...draft, color: event.target.value }))}
+                  className="h-10 w-full p-1 sm:w-16"
+                  aria-label="Category color"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="expense-category-description">Description</Label>
+              <Textarea
+                id="expense-category-description"
+                value={categoryDraft.description}
+                maxLength={500}
+                onChange={(event) => setCategoryDraft((draft) => ({ ...draft, description: event.target.value }))}
+                placeholder="Optional guidance for staff"
+                rows={2}
+              />
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              {editingCategory && (
+                <Button type="button" variant="outline" onClick={resetCategoryDraft} disabled={categorySaving}>
+                  Cancel edit
+                </Button>
+              )}
+              <Button type="submit" disabled={categorySaving || !categoryDraft.name.trim()}>
+                {categorySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {editingCategory ? 'Save Category' : 'Add Category'}
+              </Button>
+            </div>
+          </form>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Categories</h3>
+            {managedCategories.length ? managedCategories.map((category) => (
+              <div key={category.id} className="flex items-center gap-3 rounded-lg border p-3">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: category.color || '#3B82F6' }} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{category.name}</p>
+                  {category.description && <p className="line-clamp-2 text-xs text-muted-foreground">{category.description}</p>}
+                  {!category.is_active && <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Archived · unavailable for new expenses</p>}
+                </div>
+                {category.is_active ? (
+                  <>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Edit ${category.name}`}
+                      onClick={() => {
+                        setEditingCategory(category);
+                        setCategoryDraft({ name: category.name, description: category.description || '', color: category.color || '#3B82F6' });
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      aria-label={`Delete ${category.name}`}
+                      onClick={() => setCategoryToDelete(category)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </>
+                ) : (
+                  <Button type="button" size="sm" variant="outline" disabled={categorySaving} onClick={() => void handleRestoreCategory(category)}>
+                    Restore
+                  </Button>
+                )}
+              </div>
+            )) : (
+              <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No expense categories yet. Add one above.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowCategoryManager(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => { if (!open && !categoryDeleting) setCategoryToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this expense category?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {categoryToDelete?.name} will be removed from the choices staff see. If expenses already use it, the category will be archived and kept on those records.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={categoryDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={categoryDeleting || !categoryToDelete}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleCategoryDelete();
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {categoryDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Remove category
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Expense Details Dialog */}
       <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
