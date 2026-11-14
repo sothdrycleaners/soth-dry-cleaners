@@ -644,7 +644,7 @@ export default function NewOrder() {
         type="button"
         size="icon"
         variant="ghost"
-        className={`h-7 w-7 shrink-0 lg:hidden ${hasDeadline ? 'text-orange-600' : 'text-muted-foreground'}`}
+        className={`h-8 w-8 shrink-0 ${hasDeadline ? 'text-orange-600' : 'text-muted-foreground'}`}
         aria-label={hasDeadline ? `Edit Express deadline for ${itemName}` : `Set optional Express deadline for ${itemName}`}
         title={hasDeadline ? `Express deadline set for ${itemName}` : `Set optional Express deadline for ${itemName}`}
         onClick={() => openExpressDeadline(expressIndex)}
@@ -1545,7 +1545,7 @@ export default function NewOrder() {
                           name is never squeezed by the controls below it */}
                       <div className="flex items-start gap-2">
                         <div className="flex min-w-0 flex-1 items-center gap-1">
-                          <p className="min-w-0 flex-1 truncate font-medium text-sm">{item.item_name}</p>
+                          <p className="min-w-0 flex-1 whitespace-normal break-words font-medium text-sm sm:truncate">{item.item_name}</p>
                           {item.service_type === 'EXPRESS' && (
                             <Button
                               type="button"
@@ -1563,7 +1563,7 @@ export default function NewOrder() {
                             <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
                               {item.service_type}
                             </Badge>
-                            <span className="whitespace-nowrap">
+                            <span className="hidden whitespace-nowrap sm:inline">
                               {formatUGX(item.unit_price)} / {item.unit || 'piece'}
                             </span>
                           </div>
@@ -2280,7 +2280,6 @@ export default function NewOrder() {
                       <p className="min-w-0 flex-1 font-medium text-sm leading-tight whitespace-normal break-words" title={item.name}>
                         {item.name}
                       </p>
-                      {renderCatalogExpressClock(item.id, item.name)}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-1">
                       <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground capitalize lg:text-[10px]">
@@ -2357,16 +2356,19 @@ export default function NewOrder() {
                         >
                           🔥<span className="hidden sm:inline ml-0.5">Iron</span>
                         </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        aria-label={`Add express service for ${item.name}`}
-                        title="Add express service"
-                        className="col-span-1 h-10 min-w-0 px-1.5 text-xs font-medium border-orange-300 text-orange-600 hover:bg-orange-500 hover:text-white dark:border-orange-700 dark:text-orange-400 sm:col-span-2 lg:h-7 lg:text-[11px]"
-                        onClick={() => addItemToOrder(item, 'EXPRESS')}
-                      >
-                        ⚡<span className="hidden sm:inline ml-0.5">Express</span>
-                      </Button>
+                      <div className="col-span-1 flex min-w-0 gap-1 sm:col-span-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          aria-label={`Add express service for ${item.name}`}
+                          title="Add express service"
+                          className="h-10 min-w-0 flex-1 px-1.5 text-xs font-medium border-orange-300 text-orange-600 hover:bg-orange-500 hover:text-white dark:border-orange-700 dark:text-orange-400 lg:h-7 lg:text-[11px]"
+                          onClick={() => addItemToOrder(item, 'EXPRESS')}
+                        >
+                          ⚡<span className="hidden sm:inline ml-0.5">Express</span>
+                        </Button>
+                        {renderCatalogExpressClock(item.id, item.name)}
+                      </div>
                     </div>
                   </div>
                 ))}
