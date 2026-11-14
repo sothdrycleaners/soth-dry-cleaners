@@ -1,4 +1,5 @@
 import axios, { AxiosHeaders } from 'axios';
+import { isInvalidSessionResponse } from '@/lib/auth-session';
 
 const devApiUrl = import.meta.env.DEV ? import.meta.env.VITE_API_URL : undefined;
 
@@ -66,8 +67,8 @@ api.interceptors.response.use(
       sessionStorage.setItem('soth_post_login_redirect_reason', 'auth-interruption');
     };
 
-    if (status === 401 && hasAuthHeader && !isPublicAuthRoute) {
-      // Token expired or invalid
+    if (isInvalidSessionResponse(status, error.response?.data) && hasAuthHeader && !isPublicAuthRoute) {
+      // Clear the session only when the server confirms this token is unusable.
       storePostLoginRedirect();
       localStorage.removeItem('soth_token');
       localStorage.removeItem('soth_user');
