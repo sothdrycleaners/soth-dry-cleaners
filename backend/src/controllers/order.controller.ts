@@ -743,6 +743,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       if (!Number.isFinite(requestedItemSurcharge) || requestedItemSurcharge < 0) {
         throw new Error(`Item surcharge cannot be negative for ${priceItem.name}`);
       }
+      if (itemDiscount > 0 && requestedItemSurcharge > 0) {
+        throw new Error(`Choose either a bargain or a price-up for ${priceItem.name}, not both`);
+      }
 
       const itemTotal = grossItemTotal + requestedItemSurcharge - itemDiscount;
       calculatedSubtotal += itemTotal;
@@ -873,6 +876,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       : Math.max(0, parseInt(surcharge_amount.toString()) || 0);
     if (!Number.isFinite(surchargeAmountValue)) {
       throw new Error('Order price-up amount is too large');
+    }
+    if (surchargeAmountValue > 0 && (discount_amount > 0 || bargainAmountValue > 0)) {
+      throw new Error('Choose either a whole-order bargain or a price-up, not both');
     }
 
     // 3. Calculate tax.

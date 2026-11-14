@@ -632,6 +632,28 @@ export default function NewOrder() {
     setExpressDeadlineItemIndex(index);
   };
 
+  const renderCatalogExpressClock = (priceItemId: number, itemName: string) => {
+    const expressIndex = orderItems.findIndex((line) =>
+      line.price_item_id === priceItemId && line.service_type === 'EXPRESS'
+    );
+    if (expressIndex < 0) return null;
+
+    const hasDeadline = Boolean(orderItems[expressIndex].express_due_at);
+    return (
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className={`h-7 w-7 shrink-0 lg:hidden ${hasDeadline ? 'text-orange-600' : 'text-muted-foreground'}`}
+        aria-label={hasDeadline ? `Edit Express deadline for ${itemName}` : `Set optional Express deadline for ${itemName}`}
+        title={hasDeadline ? `Express deadline set for ${itemName}` : `Set optional Express deadline for ${itemName}`}
+        onClick={() => openExpressDeadline(expressIndex)}
+      >
+        <Clock3 className="h-4 w-4" />
+      </Button>
+    );
+  };
+
   const saveExpressDeadline = () => {
     if (expressDeadlineItemIndex === null || !expressDeadlineDate || !expressDeadlineTime) {
       toast({ title: 'Choose a date and time', description: 'Both fields are needed to add an optional Express deadline.', variant: 'destructive' });
@@ -955,6 +977,8 @@ export default function NewOrder() {
   const safeOrderSurcharge = Math.max(0, Math.round(
     orderDiscountMode === 'percent' ? itemsSubtotal * orderSurchargeAmount / 100 : orderSurchargeAmount
   ));
+  const hasOrderBargain = orderDiscountMode === 'percent' ? transactionDiscount > 0 : bargainAmount > 0;
+  const hasOrderPriceUp = orderSurchargeAmount > 0;
   const subtotalAfterDiscount = Math.max(0, itemsSubtotal - discountAmount - safeBargain + safeOrderSurcharge);
   const taxAmount = vatApplies ? Math.round((subtotalAfterDiscount * VAT_RATE) / 100) : 0;
   const total = subtotalAfterDiscount + taxAmount;
@@ -1660,25 +1684,27 @@ export default function NewOrder() {
                           <div className="flex h-9 w-full shrink-0 overflow-hidden rounded-md border sm:w-auto lg:h-7">
                             <button
                               type="button"
+                              disabled={Number(item.surcharge_amount || 0) > 0}
                               onClick={() => setItemAdjMode(index, 'bargain')}
-                              className={`flex-1 whitespace-nowrap px-2 text-[10px] font-semibold transition-colors sm:flex-none ${
+                              className={`flex-1 whitespace-nowrap px-2 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${
                                 getItemAdjMode(index) === 'bargain'
                                   ? 'bg-primary text-primary-foreground'
                                   : 'bg-background text-muted-foreground hover:bg-muted'
                               }`}
-                              title="Apply a bargain (reduce price)"
+                              title={Number(item.surcharge_amount || 0) > 0 ? 'Clear the price-up value before applying a bargain' : 'Apply a bargain (reduce price)'}
                             >
                               ▼ Bargain
                             </button>
                             <button
                               type="button"
+                              disabled={Number(item.discount_amount || 0) > 0}
                               onClick={() => setItemAdjMode(index, 'priceup')}
-                              className={`flex-1 whitespace-nowrap border-l px-2 text-[10px] font-semibold transition-colors sm:flex-none ${
+                              className={`flex-1 whitespace-nowrap border-l px-2 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${
                                 getItemAdjMode(index) === 'priceup'
                                   ? 'bg-amber-500 text-white'
                                   : 'bg-background text-muted-foreground hover:bg-muted'
                               }`}
-                              title="Apply a price up (stains, special treatment)"
+                              title={Number(item.discount_amount || 0) > 0 ? 'Clear the bargain value before applying a price-up' : 'Apply a price-up (stains, special treatment)'}
                             >
                               ▲ Price Up
                             </button>
@@ -1688,25 +1714,27 @@ export default function NewOrder() {
                           <div className="flex w-full max-w-24 shrink-0 overflow-hidden rounded-md border sm:w-auto">
                             <button
                               type="button"
+                              disabled={getItemInputMode(index, item) !== 'percent' && (getItemAdjMode(index) === 'priceup' ? Number(item.surcharge_amount || 0) > 0 : Number(item.discount_amount || 0) > 0)}
                               aria-pressed={getItemInputMode(index, item) === 'percent'}
                               onClick={() => canPriceUp && getItemAdjMode(index) === 'priceup'
                                 ? switchItemSurchargeMode(index, 'percent')
                                 : switchItemDiscountMode(index, 'percent')}
                               title={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
                               aria-label={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
-                              className={`flex-1 px-2 py-1 text-xs font-semibold sm:flex-none ${getItemInputMode(index, item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              className={`flex-1 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${getItemInputMode(index, item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                             >
                               %
                             </button>
                             <button
                               type="button"
+                              disabled={getItemInputMode(index, item) !== 'amount' && (getItemAdjMode(index) === 'priceup' ? Number(item.surcharge_amount || 0) > 0 : Number(item.discount_amount || 0) > 0)}
                               aria-pressed={getItemInputMode(index, item) === 'amount'}
                               onClick={() => canPriceUp && getItemAdjMode(index) === 'priceup'
                                 ? switchItemSurchargeMode(index, 'amount')
                                 : switchItemDiscountMode(index, 'amount')}
                               title={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by fixed UGX' : 'Discount by fixed UGX amount'}
                               aria-label={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by fixed UGX' : 'Discount by fixed UGX amount'}
-                              className={`flex-1 border-l px-2 py-1 text-xs font-semibold sm:flex-none ${getItemInputMode(index, item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              className={`flex-1 border-l px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none ${getItemInputMode(index, item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                             >
                               UGX
                             </button>
@@ -1859,27 +1887,31 @@ export default function NewOrder() {
                     <div className="flex overflow-hidden rounded-md border">
                       <button
                         type="button"
+                        disabled={(hasOrderBargain || hasOrderPriceUp) && orderDiscountMode !== 'percent'}
                         aria-pressed={orderDiscountMode === 'percent'}
                         onClick={() => {
+                          if (orderDiscountMode === 'percent') return;
                           setOrderDiscountMode('percent');
                           setTransactionDiscount(0);
                           setBargainAmount(0);
                           setOrderSurchargeAmount(0);
                         }}
-                        className={`px-3 py-1.5 text-xs font-semibold ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                        className={`px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                       >
                         Percentage
                       </button>
                       <button
                         type="button"
+                        disabled={(hasOrderBargain || hasOrderPriceUp) && orderDiscountMode !== 'amount'}
                         aria-pressed={orderDiscountMode === 'amount'}
                         onClick={() => {
+                          if (orderDiscountMode === 'amount') return;
                           setOrderDiscountMode('amount');
                           setTransactionDiscount(0);
                           setBargainAmount(0);
                           setOrderSurchargeAmount(0);
                         }}
-                        className={`border-l px-3 py-1.5 text-xs font-semibold ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                        className={`border-l px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                       >
                         Fixed UGX
                       </button>
@@ -1895,6 +1927,7 @@ export default function NewOrder() {
                     min="0"
                     max={maxDiscountPercent}
                     value={transactionDiscount || ''}
+                    disabled={hasOrderPriceUp}
                     onChange={(e) => {
                       const value = parseFloat(e.target.value) || 0;
                       if (value <= maxDiscountPercent) {
@@ -1934,7 +1967,7 @@ export default function NewOrder() {
                     }}
                     placeholder="0"
                     className="h-10 lg:h-8 text-sm mt-1"
-                    disabled={bargainLimitRemaining === 0}
+                    disabled={bargainLimitRemaining === 0 || hasOrderPriceUp}
                   />
                 </div>}
 
@@ -1947,6 +1980,7 @@ export default function NewOrder() {
                       type="number"
                       min="0"
                       value={orderSurchargeAmount || ''}
+                      disabled={hasOrderBargain}
                       onChange={(e) => setOrderSurchargeAmount(Math.max(0, parseFloat(e.target.value) || 0))}
                       placeholder={orderDiscountMode === 'percent' ? '0%' : '0'}
                       className="h-10 lg:h-8 text-sm mt-1 border-amber-300 focus-visible:ring-amber-400"
@@ -2242,9 +2276,12 @@ export default function NewOrder() {
                     className="min-w-0 border rounded-lg p-3 hover:shadow-md hover:border-primary/50 transition-all cursor-pointer group bg-background"
                   >
                     {/* Item name + category */}
-                    <p className="font-medium text-sm leading-tight whitespace-normal break-words" title={item.name}>
-                      {item.name}
-                    </p>
+                    <div className="flex min-w-0 items-start gap-1">
+                      <p className="min-w-0 flex-1 font-medium text-sm leading-tight whitespace-normal break-words" title={item.name}>
+                        {item.name}
+                      </p>
+                      {renderCatalogExpressClock(item.id, item.name)}
+                    </div>
                     <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-1">
                       <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground capitalize lg:text-[10px]">
                         {item.category === 'home_services' ? 'Home' : item.category}
