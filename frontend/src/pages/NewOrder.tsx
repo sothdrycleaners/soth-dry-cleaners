@@ -24,6 +24,7 @@ import {
   MessageCircle,
   StickyNote,
   Loader2,
+  Clock3,
 } from 'lucide-react';
 import {
   Select,
@@ -122,6 +123,9 @@ interface OrderItem {
   surcharge_basis_amount?: number;
   /** Explicit per-unit price-up entered by the operator */
   surcharge_per_unit?: number;
+  /** Selects whether this line's price-up is a percentage or fixed UGX. */
+  surcharge_mode?: 'percent' | 'amount';
+  surcharge_percent?: number;
   /** Whether the price-up was entered at quantity one and should scale */
   surcharge_scales_with_quantity?: boolean;
   /** Net line total: quantity × unit price + surcharge − discount */
@@ -177,9 +181,12 @@ function getScaledLineDiscount(
 }
 
 function getScaledLineSurcharge(
-  item: Pick<OrderItem, 'surcharge_amount' | 'surcharge_basis_quantity' | 'surcharge_basis_amount' | 'surcharge_per_unit' | 'surcharge_scales_with_quantity'>,
+  item: Pick<OrderItem, 'surcharge_amount' | 'surcharge_basis_quantity' | 'surcharge_basis_amount' | 'surcharge_per_unit' | 'surcharge_scales_with_quantity' | 'surcharge_mode' | 'surcharge_percent' | 'unit_price'>,
   quantity: number
 ): number {
+  if (item.surcharge_mode === 'percent') {
+    return Math.max(0, Math.round(Number(quantity) * Number(item.unit_price) * (Number(item.surcharge_percent) || 0) / 100));
+  }
   if (!item.surcharge_scales_with_quantity) {
     return Math.max(0, Math.round(Number(item.surcharge_amount || 0)));
   }
@@ -197,9 +204,9 @@ function getScaledLineSurcharge(
 
 // Whole-order percentage defaults stay separate from per-item discount caps.
 const MAX_DISCOUNT_BY_ROLE: Record<string, number> = {
-  DESKTOP_AGENT: 10,
-  MANAGER: 20,
-  ADMIN: 50,
+  DESKTOP_AGENT: 100,
+  MANAGER: 100,
+  ADMIN: 100,
 };
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
@@ -220,7 +227,7 @@ const BRANCH_PREFERENCE_KEY = 'newOrderBranchId';
 export default function NewOrder() {
   const { token, user } = useAuth();
   const { toast } = useToast();
-  const defaultMaxDiscountPercent = MAX_DISCOUNT_BY_ROLE[user?.role ?? 'DESKTOP_AGENT'] ?? 10;
+  const defaultMaxDiscountPercent = MAX_DISCOUNT_BY_ROLE[user?.role ?? 'DESKTOP_AGENT'] ?? 100;
   const defaultMaxItemDiscountPercent = 100;
   const canChooseBranch = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const isAdminUser = user?.role === 'ADMIN';
@@ -237,6 +244,9 @@ export default function NewOrder() {
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [paymentModes, setPaymentModes] = useState<PaymentModeDetails>(DEFAULT_PAYMENT_MODES);
   const [openNoteIndexes, setOpenNoteIndexes] = useState<number[]>([]);
+  const [expressDeadlineItemIndex, setExpressDeadlineItemIndex] = useState<number | null>(null);
+  const [expressDeadlineDate, setExpressDeadlineDate] = useState('');
+  const [expressDeadlineTime, setExpressDeadlineTime] = useState('');
   const [useBackdate, setUseBackdate] = useState(false);
   const [orderDate, setOrderDate] = useState(kampalaTodayYmd());
   /** Per-item adjustment mode: 'bargain' = reduce price, 'priceup' = increase price */
@@ -247,6 +257,10 @@ export default function NewOrder() {
   };
   const getLineDiscountMode = (item: OrderItem): 'percent' | 'amount' =>
     item.discount_mode === 'amount' ? 'amount' : 'percent';
+  const getLineSurchargeMode = (item: OrderItem): 'percent' | 'amount' =>
+    item.surcharge_mode ?? getLineDiscountMode(item);
+  const getItemInputMode = (index: number, item: OrderItem): 'percent' | 'amount' =>
+    canPriceUp && getItemAdjMode(index) === 'priceup' ? getLineSurchargeMode(item) : getLineDiscountMode(item);
 
   // After create: offer WhatsApp Messenger
   const [whatsappDialogOpen, setWhatsappDialogOpen] = useState(false);
@@ -480,13 +494,17 @@ export default function NewOrder() {
       allocated += lineBase;
       const quantity = Math.max(1, Math.round(Number(item.quantity) || 1));
       const unitPrice = Math.round(lineBase / quantity);
+      const surcharge = item.surcharge_mode === 'percent'
+        ? Math.round(quantity * unitPrice * (Number(item.surcharge_percent) || 0) / 100)
+        : Number(item.surcharge_amount || 0);
       return {
         ...item,
         pricing_mode: 'catalogue_kg' as const,
         unit: 'piece',
         unit_price: unitPrice,
         kg_rate: standardKgRate,
-        subtotal: computeLineSubtotal(quantity, unitPrice, Number(item.discount_amount || 0), Number(item.surcharge_amount || 0)),
+        surcharge_amount: surcharge,
+        subtotal: computeLineSubtotal(quantity, unitPrice, Number(item.discount_amount || 0), surcharge),
       };
     });
   };
@@ -499,6 +517,10 @@ export default function NewOrder() {
     const kgRate = getOrderKgRate(current);
     if (globalKgMode) return;
     const nextUnitPrice = nextMode === 'kg' ? kgRate : currentBaseRate || current.unit_price;
+    const nextSurcharge = getScaledLineSurcharge(
+      { ...current, unit_price: nextUnitPrice },
+      Number(current.quantity)
+    );
 
     const updated = [...orderItems];
     updated[index] = {
@@ -508,11 +530,12 @@ export default function NewOrder() {
       unit_price: nextUnitPrice,
       kg_rate: kgRate,
       base_unit_price: current.base_unit_price ?? current.unit_price,
+      surcharge_amount: nextSurcharge,
       subtotal: computeLineSubtotal(
         Number(updated[index].quantity),
         nextUnitPrice,
         Number(updated[index].discount_amount || 0),
-        Number(updated[index].surcharge_amount || 0)
+        nextSurcharge
       ),
     };
     setOrderItems(updated);
@@ -601,6 +624,40 @@ export default function NewOrder() {
     });
   };
 
+  const openExpressDeadline = (index: number) => {
+    const currentDeadline = orderItems[index]?.express_due_at;
+    const localDeadline = currentDeadline ? toLocalDateTimeInput(new Date(currentDeadline)) : '';
+    setExpressDeadlineDate(localDeadline ? localDeadline.slice(0, 10) : toLocalDateTimeInput(new Date()).slice(0, 10));
+    setExpressDeadlineTime(localDeadline ? localDeadline.slice(11, 16) : '');
+    setExpressDeadlineItemIndex(index);
+  };
+
+  const saveExpressDeadline = () => {
+    if (expressDeadlineItemIndex === null || !expressDeadlineDate || !expressDeadlineTime) {
+      toast({ title: 'Choose a date and time', description: 'Both fields are needed to add an optional Express deadline.', variant: 'destructive' });
+      return;
+    }
+    const deadline = new Date(`${expressDeadlineDate}T${expressDeadlineTime}`);
+    if (!Number.isFinite(deadline.getTime()) || deadline.getTime() <= Date.now()) {
+      toast({ title: 'Choose a future time', description: 'The Express needed-by time must be in the future.', variant: 'destructive' });
+      return;
+    }
+    const dueAt = deadline.toISOString();
+    setOrderItems((current) => current.map((item, index) =>
+      index === expressDeadlineItemIndex ? { ...item, express_due_at: dueAt } : item
+    ));
+    setExpressDeadlineItemIndex(null);
+  };
+
+  const clearExpressDeadline = () => {
+    if (expressDeadlineItemIndex !== null) {
+      setOrderItems((current) => current.map((item, index) =>
+        index === expressDeadlineItemIndex ? { ...item, express_due_at: null } : item
+      ));
+    }
+    setExpressDeadlineItemIndex(null);
+  };
+
   // Update quantity (+/− or commit from typed value)
   const updateQuantity = (index: number, newQuantity: number) => {
     const currentItem = orderItems[index];
@@ -620,10 +677,13 @@ export default function NewOrder() {
 
     const updated = [...orderItems];
     const nextDiscount = getScaledLineDiscount(updated[index], normalizedQuantity);
-    const nextSurcharge = getScaledLineSurcharge(updated[index], normalizedQuantity);
     const currentUnitPrice = Number(updated[index].pricing_mode === 'kg'
       ? getOrderKgRate(updated[index])
       : (updated[index].base_unit_price ?? updated[index].unit_price)) || Number(updated[index].unit_price || 0);
+    const nextSurcharge = getScaledLineSurcharge(
+      { ...updated[index], unit_price: currentUnitPrice },
+      normalizedQuantity
+    );
 
     updated[index] = {
       ...updated[index],
@@ -667,10 +727,13 @@ export default function NewOrder() {
     const quantity = isKg ? Math.round(parsed * 100) / 100 : Math.round(parsed);
     const updated = [...orderItems];
     const nextDiscount = getScaledLineDiscount(updated[index], quantity);
-    const nextSurcharge = getScaledLineSurcharge(updated[index], quantity);
     const currentUnitPrice = Number(updated[index].pricing_mode === 'kg'
       ? getOrderKgRate(updated[index])
       : (updated[index].base_unit_price ?? updated[index].unit_price)) || Number(updated[index].unit_price || 0);
+    const nextSurcharge = getScaledLineSurcharge(
+      { ...updated[index], unit_price: currentUnitPrice },
+      quantity
+    );
 
     updated[index] = {
       ...updated[index],
@@ -767,6 +830,24 @@ export default function NewOrder() {
     setOrderItems(updated);
   };
 
+  const switchItemSurchargeMode = (index: number, mode: 'percent' | 'amount') => {
+    const current = orderItems[index];
+    if (!current || getLineSurchargeMode(current) === mode) return;
+    const updated = [...orderItems];
+    updated[index] = {
+      ...current,
+      surcharge_mode: mode,
+      surcharge_percent: undefined,
+      surcharge_amount: 0,
+      surcharge_per_unit: 0,
+      surcharge_basis_quantity: undefined,
+      surcharge_basis_amount: 0,
+      surcharge_scales_with_quantity: false,
+      subtotal: computeLineSubtotal(current.quantity, current.unit_price, current.discount_amount || 0, 0),
+    };
+    setOrderItems(updated);
+  };
+
   const updateItemSurcharge = (index: number, rawValue: string) => {
     const current = orderItems[index];
     if (!current) return;
@@ -776,6 +857,8 @@ export default function NewOrder() {
     const updated = [...orderItems];
     updated[index] = {
       ...updated[index],
+      surcharge_mode: 'amount',
+      surcharge_percent: undefined,
       surcharge_amount: totalSurcharge,
       surcharge_per_unit: parsed,
       surcharge_scales_with_quantity: shouldScale,
@@ -787,6 +870,27 @@ export default function NewOrder() {
         current.discount_amount || 0,
         totalSurcharge
       ),
+    };
+    setOrderItems(updated);
+  };
+
+  const updateItemSurchargePercent = (index: number, rawValue: string) => {
+    const current = orderItems[index];
+    if (!current) return;
+    const percent = Math.max(0, Number(rawValue) || 0);
+    const gross = Math.round(Number(current.quantity) * Number(current.unit_price));
+    const totalSurcharge = Math.round(gross * percent / 100);
+    const updated = [...orderItems];
+    updated[index] = {
+      ...current,
+      surcharge_mode: 'percent',
+      surcharge_percent: percent,
+      surcharge_amount: totalSurcharge,
+      surcharge_per_unit: undefined,
+      surcharge_scales_with_quantity: true,
+      surcharge_basis_quantity: current.quantity,
+      surcharge_basis_amount: totalSurcharge,
+      subtotal: computeLineSubtotal(current.quantity, current.unit_price, current.discount_amount || 0, totalSurcharge),
     };
     setOrderItems(updated);
   };
@@ -848,7 +952,9 @@ export default function NewOrder() {
     Math.max(0, itemsSubtotal - discountAmount),
     bargainLimitRemaining
   );
-  const safeOrderSurcharge = Math.max(0, Math.round(orderSurchargeAmount));
+  const safeOrderSurcharge = Math.max(0, Math.round(
+    orderDiscountMode === 'percent' ? itemsSubtotal * orderSurchargeAmount / 100 : orderSurchargeAmount
+  ));
   const subtotalAfterDiscount = Math.max(0, itemsSubtotal - discountAmount - safeBargain + safeOrderSurcharge);
   const taxAmount = vatApplies ? Math.round((subtotalAfterDiscount * VAT_RATE) / 100) : 0;
   const total = subtotalAfterDiscount + taxAmount;
@@ -1007,15 +1113,13 @@ export default function NewOrder() {
 
   const handleCreateOrder = async () => {
     if (creatingOrderRef.current) return;
-    const invalidExpressItem = orderItems.find((item) =>
-      item.service_type === 'EXPRESS' &&
-      (!item.express_due_at || !Number.isFinite(new Date(item.express_due_at).getTime()) || new Date(item.express_due_at).getTime() <= Date.now())
-    );
+    const invalidExpressItem = orderItems.find((item) => item.service_type === 'EXPRESS' && item.express_due_at &&
+      (!Number.isFinite(new Date(item.express_due_at).getTime()) || new Date(item.express_due_at).getTime() <= Date.now()));
     if (invalidExpressItem) {
       toast({
         variant: 'destructive',
-        title: 'Express deadline required',
-        description: 'Choose a future “Needed by” time for each Express item before creating the order.',
+        title: 'Check Express time',
+        description: 'An Express deadline must be in the future. Clear it or choose a later time.',
       });
       return;
     }
@@ -1071,6 +1175,8 @@ export default function NewOrder() {
         discount_amount: discountAmount,
         bargain_amount: safeBargain,
         surcharge_amount: safeOrderSurcharge,
+        surcharge_mode: orderDiscountMode,
+        surcharge_percent: orderDiscountMode === 'percent' ? orderSurchargeAmount : 0,
         total_amount: total,
         payment_status: paymentStatus,
         payment_method: paymentMethod === 'MOBILE_MONEY' ? `${paymentMethod}_${mobileProvider}` : paymentMethod,
@@ -1414,8 +1520,21 @@ export default function NewOrder() {
                       {/* Name and line total share the full panel width so the
                           name is never squeezed by the controls below it */}
                       <div className="flex items-start gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{item.item_name}</p>
+                        <div className="flex min-w-0 flex-1 items-center gap-1">
+                          <p className="min-w-0 flex-1 truncate font-medium text-sm">{item.item_name}</p>
+                          {item.service_type === 'EXPRESS' && (
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className={`h-7 w-7 shrink-0 ${item.express_due_at ? 'text-orange-600' : 'text-muted-foreground'}`}
+                              aria-label={item.express_due_at ? 'Edit Express deadline' : 'Set optional Express deadline'}
+                              title={item.express_due_at ? `Needed by ${new Date(item.express_due_at).toLocaleString()}` : 'Set optional Express deadline'}
+                              onClick={() => openExpressDeadline(index)}
+                            >
+                              <Clock3 className="h-4 w-4" />
+                            </Button>
+                          )}
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                             <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
                               {item.service_type}
@@ -1437,29 +1556,6 @@ export default function NewOrder() {
                         </span>
                       </div>
 
-                      {item.service_type === 'EXPRESS' && (
-                        <div className="flex flex-wrap items-end gap-3 rounded-md border border-orange-200 bg-orange-50/70 p-2 dark:border-orange-900 dark:bg-orange-950/20">
-                          <label className="grid gap-1 text-xs font-medium text-orange-900 dark:text-orange-200">
-                            Express needed by
-                            <Input
-                              type="datetime-local"
-                              required
-                              min={toLocalDateTimeInput(new Date())}
-                              value={item.express_due_at ? toLocalDateTimeInput(new Date(item.express_due_at)) : ''}
-                              onChange={(event) => {
-                                const dueAt = event.target.value ? new Date(event.target.value).toISOString() : null;
-                                setOrderItems((current) => current.map((line, lineIndex) =>
-                                  lineIndex === index ? { ...line, express_due_at: dueAt } : line
-                                ));
-                              }}
-                              className="h-9 w-60 bg-background text-sm"
-                            />
-                          </label>
-                          <span className="pb-2 text-xs text-orange-800 dark:text-orange-300">
-                            Operations will see this deadline. The order remains usable at the desk.
-                          </span>
-                        </div>
-                      )}
                       <div className="flex items-center gap-1">
                         <Button
                           size="icon"
@@ -1588,25 +1684,29 @@ export default function NewOrder() {
                             </button>
                           </div>
                         )}
-                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') && allowedItemDiscountMode === 'both' && (
+                        {allowedItemDiscountMode === 'both' && (
                           <div className="flex w-full max-w-24 shrink-0 overflow-hidden rounded-md border sm:w-auto">
                             <button
                               type="button"
-                              aria-pressed={getLineDiscountMode(item) === 'percent'}
-                              onClick={() => switchItemDiscountMode(index, 'percent')}
-                              title="Discount by percentage"
-                              aria-label="Discount by percentage"
-                              className={`flex-1 px-2 py-1 text-xs font-semibold sm:flex-none ${getLineDiscountMode(item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              aria-pressed={getItemInputMode(index, item) === 'percent'}
+                              onClick={() => canPriceUp && getItemAdjMode(index) === 'priceup'
+                                ? switchItemSurchargeMode(index, 'percent')
+                                : switchItemDiscountMode(index, 'percent')}
+                              title={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
+                              aria-label={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by percentage' : 'Discount by percentage'}
+                              className={`flex-1 px-2 py-1 text-xs font-semibold sm:flex-none ${getItemInputMode(index, item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                             >
                               %
                             </button>
                             <button
                               type="button"
-                              aria-pressed={getLineDiscountMode(item) === 'amount'}
-                              onClick={() => switchItemDiscountMode(index, 'amount')}
-                              title="Discount by fixed UGX amount"
-                              aria-label="Discount by fixed UGX amount"
-                              className={`flex-1 border-l px-2 py-1 text-xs font-semibold sm:flex-none ${getLineDiscountMode(item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              aria-pressed={getItemInputMode(index, item) === 'amount'}
+                              onClick={() => canPriceUp && getItemAdjMode(index) === 'priceup'
+                                ? switchItemSurchargeMode(index, 'amount')
+                                : switchItemDiscountMode(index, 'amount')}
+                              title={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by fixed UGX' : 'Discount by fixed UGX amount'}
+                              aria-label={canPriceUp && getItemAdjMode(index) === 'priceup' ? 'Price up by fixed UGX' : 'Discount by fixed UGX amount'}
+                              className={`flex-1 border-l px-2 py-1 text-xs font-semibold sm:flex-none ${getItemInputMode(index, item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                             >
                               UGX
                             </button>
@@ -1617,18 +1717,24 @@ export default function NewOrder() {
                           type="number"
                           inputMode="numeric"
                           min={0}
-                          max={(!canPriceUp || getItemAdjMode(index) === 'bargain') && getLineDiscountMode(item) === 'percent'
+                          max={(!canPriceUp || getItemAdjMode(index) === 'bargain') && getItemInputMode(index, item) === 'percent'
                             ? maxItemDiscountPercent : undefined}
-                          step={(!canPriceUp || getItemAdjMode(index) === 'bargain') && getLineDiscountMode(item) === 'percent' ? 1 : 500}
+                          step={getItemInputMode(index, item) === 'percent' ? 1 : 500}
                           value={canPriceUp && getItemAdjMode(index) === 'priceup'
-                            ? (item.surcharge_per_unit ? String(item.surcharge_per_unit) : '')
+                            ? getLineSurchargeMode(item) === 'percent'
+                              ? (item.surcharge_percent ?? '')
+                              : (item.surcharge_per_unit ? String(item.surcharge_per_unit) : '')
                             : getLineDiscountMode(item) === 'percent'
                               ? (item.item_discount_percent ?? '')
                               : (item.discount_amount ? String(Math.round(Number(item.discount_amount) / Number(item.quantity))) : '')}
                           placeholder="0"
                           onChange={(e) => {
                             if (canPriceUp && getItemAdjMode(index) === 'priceup') {
-                              updateItemSurcharge(index, e.target.value);
+                              if (getLineSurchargeMode(item) === 'percent') {
+                                updateItemSurchargePercent(index, e.target.value);
+                              } else {
+                                updateItemSurcharge(index, e.target.value);
+                              }
                             } else if (getLineDiscountMode(item) === 'percent') {
                               updateItemDiscountPercent(index, Number(e.target.value) || 0);
                             } else {
@@ -1642,7 +1748,9 @@ export default function NewOrder() {
                           }`}
                           title={
                             canPriceUp && getItemAdjMode(index) === 'priceup'
-                              ? 'Price-up per unit for stains or special treatment; multiplies with quantity.'
+                              ? getLineSurchargeMode(item) === 'percent'
+                                ? 'Price-up percentage applied to this line value; recalculates with quantity.'
+                                : 'Fixed UGX price-up per unit or line for stains and special treatment.'
                               : getLineDiscountMode(item) === 'percent'
                                 ? `Percentage discount on this line, up to ${maxItemDiscountPercent}%. It recalculates with quantity.`
                                 : fullItemAmountAllowed
@@ -1747,7 +1855,7 @@ export default function NewOrder() {
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                 {allowedOrderDiscountMode === 'both' && (
                   <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 lg:col-span-3">
-                    <Label className="text-xs text-muted-foreground">Whole-order discount mode</Label>
+                    <Label className="text-xs text-muted-foreground">Whole-order adjustment mode</Label>
                     <div className="flex overflow-hidden rounded-md border">
                       <button
                         type="button"
@@ -1756,6 +1864,7 @@ export default function NewOrder() {
                           setOrderDiscountMode('percent');
                           setTransactionDiscount(0);
                           setBargainAmount(0);
+                          setOrderSurchargeAmount(0);
                         }}
                         className={`px-3 py-1.5 text-xs font-semibold ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                       >
@@ -1768,6 +1877,7 @@ export default function NewOrder() {
                           setOrderDiscountMode('amount');
                           setTransactionDiscount(0);
                           setBargainAmount(0);
+                          setOrderSurchargeAmount(0);
                         }}
                         className={`border-l px-3 py-1.5 text-xs font-semibold ${orderDiscountMode === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                       >
@@ -1831,16 +1941,16 @@ export default function NewOrder() {
                 {canPriceUp && (
                   <div>
                     <Label className="text-xs text-amber-600 font-medium">
-                      Price Up <span className="text-muted-foreground/70 font-normal">(surcharge)</span>
+                      Price Up ({orderDiscountMode === 'percent' ? '%' : 'UGX'}) <span className="text-muted-foreground/70 font-normal">({orderDiscountMode === 'percent' ? 'of order subtotal' : 'surcharge'})</span>
                     </Label>
                     <Input
                       type="number"
                       min="0"
                       value={orderSurchargeAmount || ''}
                       onChange={(e) => setOrderSurchargeAmount(Math.max(0, parseFloat(e.target.value) || 0))}
-                      placeholder="0"
+                      placeholder={orderDiscountMode === 'percent' ? '0%' : '0'}
                       className="h-10 lg:h-8 text-sm mt-1 border-amber-300 focus-visible:ring-amber-400"
-                      title="Add an order-level surcharge (e.g. stain treatment fee)"
+                      title={orderDiscountMode === 'percent' ? 'Add an order-level percentage surcharge' : 'Add a fixed UGX order-level surcharge'}
                     />
                   </div>
                 )}
@@ -2234,6 +2344,43 @@ export default function NewOrder() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={expressDeadlineItemIndex !== null}
+        onOpenChange={(open) => { if (!open) setExpressDeadlineItemIndex(null); }}
+      >
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-sm p-4 sm:p-6">
+          <DialogHeader className="pr-8">
+            <DialogTitle>Express needed-by time</DialogTitle>
+            <DialogDescription>
+              Optional for {expressDeadlineItemIndex !== null ? orderItems[expressDeadlineItemIndex]?.item_name : 'this item'}. If left unset, the order still proceeds and Operations sees no deadline.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => setExpressDeadlineDate(toLocalDateTimeInput(new Date()).slice(0, 10))}>Today</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setExpressDeadlineDate(toLocalDateTimeInput(new Date(Date.now() + 24 * 60 * 60 * 1000)).slice(0, 10))}>Tomorrow</Button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="express-deadline-date">Date</Label>
+                <Input id="express-deadline-date" type="date" min={toLocalDateTimeInput(new Date()).slice(0, 10)} value={expressDeadlineDate} onChange={(event) => setExpressDeadlineDate(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="express-deadline-time">Time</Label>
+                <Input id="express-deadline-time" type="time" value={expressDeadlineTime} onChange={(event) => setExpressDeadlineTime(event.target.value)} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            {expressDeadlineItemIndex !== null && orderItems[expressDeadlineItemIndex]?.express_due_at && (
+              <Button type="button" variant="ghost" onClick={clearExpressDeadline} className="sm:mr-auto">Remove time</Button>
+            )}
+            <Button type="button" variant="outline" onClick={() => setExpressDeadlineItemIndex(null)}>Cancel</Button>
+            <Button type="button" onClick={saveExpressDeadline}>Save time</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add New Customer Dialog */}
       <Dialog open={showAddCustomerDialog} onOpenChange={setShowAddCustomerDialog}>

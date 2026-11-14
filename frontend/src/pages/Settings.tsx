@@ -168,9 +168,9 @@ export default function Settings() {
   const [desktopAgentFullItemAmount, setDesktopAgentFullItemAmount] = useState(true);
   const [managerFullItemAmount, setManagerFullItemAmount] = useState(true);
   const [adminFullItemAmount, setAdminFullItemAmount] = useState(true);
-  const [desktopAgentDiscountPercent, setDesktopAgentDiscountPercent] = useState('10');
-  const [managerDiscountPercent, setManagerDiscountPercent] = useState('20');
-  const [adminDiscountPercent, setAdminDiscountPercent] = useState('50');
+  const [desktopAgentDiscountPercent, setDesktopAgentDiscountPercent] = useState('100');
+  const [managerDiscountPercent, setManagerDiscountPercent] = useState('100');
+  const [adminDiscountPercent, setAdminDiscountPercent] = useState('100');
   const [desktopAgentItemDiscountPercent, setDesktopAgentItemDiscountPercent] = useState('100');
   const [managerItemDiscountPercent, setManagerItemDiscountPercent] = useState('100');
   const [adminItemDiscountPercent, setAdminItemDiscountPercent] = useState('100');
@@ -410,9 +410,9 @@ export default function Settings() {
       setDesktopAgentFullItemAmount(response.data.desktop_agent_full_item_amount !== false);
       setManagerFullItemAmount(response.data.manager_full_item_amount !== false);
       setAdminFullItemAmount(response.data.admin_full_item_amount !== false);
-      setDesktopAgentDiscountPercent(toLimit(response.data.desktop_agent_discount_percent, 10));
-      setManagerDiscountPercent(toLimit(response.data.manager_discount_percent, 20));
-      setAdminDiscountPercent(toLimit(response.data.admin_discount_percent, 50));
+      setDesktopAgentDiscountPercent(toLimit(response.data.desktop_agent_discount_percent, 100));
+      setManagerDiscountPercent(toLimit(response.data.manager_discount_percent, 100));
+      setAdminDiscountPercent(toLimit(response.data.admin_discount_percent, 100));
       setDesktopAgentItemDiscountPercent(toLimit(response.data.desktop_agent_item_discount_percent, 100));
       setManagerItemDiscountPercent(toLimit(response.data.manager_item_discount_percent, 100));
       setAdminItemDiscountPercent(toLimit(response.data.admin_item_discount_percent, 100));
@@ -716,9 +716,9 @@ export default function Settings() {
     setDesktopAgentFullItemAmount(true);
     setManagerFullItemAmount(true);
     setAdminFullItemAmount(true);
-    setDesktopAgentDiscountPercent('10');
-    setManagerDiscountPercent('20');
-    setAdminDiscountPercent('50');
+    setDesktopAgentDiscountPercent('100');
+    setManagerDiscountPercent('100');
+    setAdminDiscountPercent('100');
     setDesktopAgentItemDiscountPercent('100');
     setManagerItemDiscountPercent('100');
     setAdminItemDiscountPercent('100');
@@ -2513,7 +2513,7 @@ Don't miss out! ✨`;
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                Choose Percentage, Fixed UGX, or Both separately for per-item and whole-order discounts. Both lets staff choose one mode for each item or order; the corresponding role limit is enforced.
+                Choose Percentage, Fixed UGX, or Both separately for per-item and whole-order adjustments. The selected unit applies to bargains and price-ups; Both lets staff choose a mode for each item or order.
                 When staff apply a bargain, administrators are notified for tracking purposes.
               </AlertDescription>
             </Alert>
@@ -2571,7 +2571,7 @@ Don't miss out! ✨`;
 
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase">Whole-Order Discount Mode</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase">Whole-Order Adjustment Mode</h3>
                   <div className="flex rounded-md border overflow-hidden h-9">
                     <button type="button" onClick={() => setOrderDiscountMode('percent')}
                       className={`px-3 text-xs font-semibold ${orderDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
@@ -2610,7 +2610,7 @@ Don't miss out! ✨`;
 
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Discount Mode</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase">Per-Item Adjustment Mode</h3>
                   <div className="flex rounded-md border overflow-hidden h-9">
                     <button type="button" onClick={() => setItemDiscountMode('percent')}
                       className={`px-3 text-xs font-semibold ${itemDiscountMode === 'percent' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>

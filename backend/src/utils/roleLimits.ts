@@ -5,9 +5,9 @@ export const DEFAULT_BARGAIN_LIMITS = {
 } as const;
 
 export const MAX_DISCOUNT_BY_ROLE = {
-  DESKTOP_AGENT: 10,
-  MANAGER: 20,
-  ADMIN: 50,
+  DESKTOP_AGENT: 100,
+  MANAGER: 100,
+  ADMIN: 100,
 } as const;
 
 /**
@@ -27,7 +27,7 @@ export function getEffectiveBargainLimit(
 }
 
 export function getMaxDiscountForRole(role: string): number {
-  return MAX_DISCOUNT_BY_ROLE[role as keyof typeof MAX_DISCOUNT_BY_ROLE] ?? 10;
+  return MAX_DISCOUNT_BY_ROLE[role as keyof typeof MAX_DISCOUNT_BY_ROLE] ?? 100;
 }
 
 export function normalizePhone(phone: string): string {

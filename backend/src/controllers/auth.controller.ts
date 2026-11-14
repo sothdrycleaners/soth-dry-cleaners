@@ -697,7 +697,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       user.profile_picture_url || user.profile_picture,
       user.tenant_id
     );
-    user.max_discount_percent = user.role === 'DESKTOP_AGENT' ? 10 : user.role === 'MANAGER' ? 20 : 50;
+    user.max_discount_percent = 100;
     user.max_item_discount_percent = 100;
     user.item_discount_mode = 'both';
     user.order_discount_mode = 'both';

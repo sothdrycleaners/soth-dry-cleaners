@@ -474,6 +474,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       bargain_amount = 0,
       order_discount_mode,
       surcharge_amount = 0,
+      surcharge_mode = 'amount',
+      surcharge_percent = 0,
       payment_status = 'UNPAID',
       payment_method = 'CASH',
       amount_paid = 0,
@@ -633,10 +635,10 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const serviceType = item.service_type?.toUpperCase(); // Normalize to uppercase
       const quantity = Number(item.quantity);
       let expressDueAt: Date | null = null;
-      if (serviceType === 'EXPRESS') {
-        const parsedExpressDueAt = item.express_due_at ? new Date(item.express_due_at) : null;
-        if (!parsedExpressDueAt || !Number.isFinite(parsedExpressDueAt.getTime()) || parsedExpressDueAt.getTime() <= Date.now()) {
-          throw new Error('Choose a future Express needed-by time for each Express item');
+      if (serviceType === 'EXPRESS' && item.express_due_at) {
+        const parsedExpressDueAt = new Date(item.express_due_at);
+        if (!Number.isFinite(parsedExpressDueAt.getTime()) || parsedExpressDueAt.getTime() <= Date.now()) {
+          throw new Error('An Express needed-by time must be in the future');
         }
         expressDueAt = parsedExpressDueAt;
       }
@@ -726,8 +728,19 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const itemDiscount = Math.min(requestedItemDiscount, grossItemTotal);
 
       // Per-item surcharge (price-up): available to all authenticated staff
-      const requestedItemSurcharge = Math.round(Number(item.surcharge_amount) || 0);
-      if (requestedItemSurcharge < 0) {
+      const itemSurchargeMode = item.surcharge_mode === 'percent' ? 'percent' : 'amount';
+      const requestedItemSurchargePercent = Number(item.surcharge_percent ?? 0);
+      const hasItemSurcharge = Number(item.surcharge_amount) > 0 || requestedItemSurchargePercent > 0;
+      if (hasItemSurcharge && configuredItemDiscountMode !== 'both' && itemSurchargeMode !== configuredItemDiscountMode) {
+        throw new Error(`The administrator has set per-item adjustments to ${configuredItemDiscountMode === 'percent' ? 'percentage' : 'fixed UGX'} mode`);
+      }
+      if (itemSurchargeMode === 'percent' && (!Number.isFinite(requestedItemSurchargePercent) || requestedItemSurchargePercent < 0)) {
+        throw new Error(`Price-up percentage is invalid for ${priceItem.name}`);
+      }
+      const requestedItemSurcharge = itemSurchargeMode === 'percent'
+        ? Math.round(grossItemTotal * requestedItemSurchargePercent / 100)
+        : Math.round(Number(item.surcharge_amount) || 0);
+      if (!Number.isFinite(requestedItemSurcharge) || requestedItemSurcharge < 0) {
         throw new Error(`Item surcharge cannot be negative for ${priceItem.name}`);
       }
 
@@ -846,7 +859,21 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     }
     
     // 2.6. Validate order-level surcharge (price-up) — available to all staff
-    const surchargeAmountValue = Math.max(0, parseInt(surcharge_amount.toString()) || 0);
+    const surchargeMode = surcharge_mode === 'percent' ? 'percent' : 'amount';
+    const surchargePercentValue = Number(surcharge_percent) || 0;
+    const hasOrderSurcharge = Number(surcharge_amount) > 0 || surchargePercentValue > 0;
+    if (hasOrderSurcharge && configuredOrderDiscountMode !== 'both' && surchargeMode !== configuredOrderDiscountMode) {
+      throw new Error(`The administrator has set whole-order adjustments to ${configuredOrderDiscountMode === 'percent' ? 'percentage' : 'fixed UGX'} mode`);
+    }
+    if (!Number.isFinite(surchargePercentValue) || surchargePercentValue < 0) {
+      throw new Error('Order price-up percentage must be a valid non-negative number');
+    }
+    const surchargeAmountValue = surchargeMode === 'percent'
+      ? Math.round(calculatedSubtotal * surchargePercentValue / 100)
+      : Math.max(0, parseInt(surcharge_amount.toString()) || 0);
+    if (!Number.isFinite(surchargeAmountValue)) {
+      throw new Error('Order price-up amount is too large');
+    }
 
     // 3. Calculate tax.
     // VAT is only ever charged when URA compliance is switched on in Settings.

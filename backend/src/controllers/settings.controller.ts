@@ -388,7 +388,7 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
       `SELECT setting_value FROM business_settings WHERE setting_key = 'discount_limits' AND tenant_id = app_current_tenant_id()`
     );
     let discountLimits: Record<string, any> = {
-      desktop_agent: 10, manager: 20, admin: 50,
+      desktop_agent: 100, manager: 100, admin: 100,
       desktop_agent_item: 100, manager_item: 100, admin_item: 100,
       desktop_agent_full_order_amount: true, manager_full_order_amount: true, admin_full_order_amount: true,
       desktop_agent_full_item_amount: true, manager_full_item_amount: true, admin_full_item_amount: true,
@@ -418,9 +418,9 @@ export const getBargainLimits = async (req: AuthRequest, res: Response) => {
       manager_per_item:       limits.manager.per_item,
       admin:                  limits.admin.overall,
       admin_per_item:         limits.admin.per_item,
-      desktop_agent_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent)) ? Number(discountLimits.desktop_agent) : 10,
-      manager_discount_percent: Number.isFinite(Number(discountLimits.manager)) ? Number(discountLimits.manager) : 20,
-      admin_discount_percent: Number.isFinite(Number(discountLimits.admin)) ? Number(discountLimits.admin) : 50,
+      desktop_agent_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent)) ? Number(discountLimits.desktop_agent) : 100,
+      manager_discount_percent: Number.isFinite(Number(discountLimits.manager)) ? Number(discountLimits.manager) : 100,
+      admin_discount_percent: Number.isFinite(Number(discountLimits.admin)) ? Number(discountLimits.admin) : 100,
       desktop_agent_item_discount_percent: Number.isFinite(Number(discountLimits.desktop_agent_item)) ? Number(discountLimits.desktop_agent_item) : 100,
       manager_item_discount_percent: Number.isFinite(Number(discountLimits.manager_item)) ? Number(discountLimits.manager_item) : 100,
       admin_item_discount_percent: Number.isFinite(Number(discountLimits.admin_item)) ? Number(discountLimits.admin_item) : 100,
@@ -474,9 +474,9 @@ export const updateBargainLimits = async (req: AuthRequest, res: Response) => {
     const desktopAgentItem = parseLimit(desktop_agent_item_limit);
     const managerItem      = parseLimit(manager_item_limit);
     const adminItem        = parseLimit(admin_item_limit);
-    const desktopAgentDiscount = parsePercent(desktop_agent_discount_percent, 10);
-    const managerDiscount = parsePercent(manager_discount_percent, 20);
-    const adminDiscount = parsePercent(admin_discount_percent, 50);
+    const desktopAgentDiscount = parsePercent(desktop_agent_discount_percent, 100);
+    const managerDiscount = parsePercent(manager_discount_percent, 100);
+    const adminDiscount = parsePercent(admin_discount_percent, 100);
     const desktopAgentItemDiscount = parsePercent(desktop_agent_item_discount_percent, 100);
     const managerItemDiscount = parsePercent(manager_item_discount_percent, 100);
     const adminItemDiscount = parsePercent(admin_item_discount_percent, 100);
