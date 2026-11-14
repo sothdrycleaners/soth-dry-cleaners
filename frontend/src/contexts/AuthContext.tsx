@@ -140,6 +140,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const navigate = useNavigate();
   const inactivityTimer = useRef<NodeJS.Timeout | null>(null);
   const warningTimer = useRef<NodeJS.Timeout | null>(null);
+  const logoutTimer = useRef<NodeJS.Timeout | null>(null);
   const lastActivityWrite = useRef(0);
 
   // Get session timeout from user object (user preference or default)
@@ -207,6 +208,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (warningTimer.current) {
       clearTimeout(warningTimer.current);
     }
+    if (logoutTimer.current) {
+      clearTimeout(logoutTimer.current);
+    }
     
     setShowTimeoutWarning(false);
     setShowExpiredModal(false);
@@ -237,7 +241,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (warningTimer.current) {
       clearTimeout(warningTimer.current);
     }
-    
+    if (logoutTimer.current) {
+      clearTimeout(logoutTimer.current);
+      logoutTimer.current = null;
+    }
+
+    // Activity in another tab can cancel a timeout warning before sign-out.
+    setShowExpiredModal(false);
+
     // Hide warning if user becomes active
     if (showTimeoutWarning) {
       setShowTimeoutWarning(false);
@@ -254,16 +265,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setWarningSeconds(60);
       }, timeout - WARNING_TIME);
       
-      // Set actual timeout timer
-      inactivityTimer.current = setTimeout(() => {
+      // Each browser tab has its own in-memory timer, but activity is shared in localStorage.
+      // Recheck the shared timestamp before expiring so an idle background tab cannot sign out
+      // another tab that is still being used.
+      const expireOnlyIfInactive = () => {
+        const lastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
+        const remaining = lastActivity > 0
+          ? timeout - (Date.now() - lastActivity)
+          : 0;
+
+        if (remaining > 0) {
+          inactivityTimer.current = setTimeout(expireOnlyIfInactive, remaining);
+          return;
+        }
+
         setShowTimeoutWarning(false);
         setShowExpiredModal(true);
-        setTimeout(() => {
+        logoutTimer.current = setTimeout(() => {
           logout(true);
-        }, 3000); // Give user 3 seconds to see the message before redirecting
-      }, timeout);
+        }, 3000); // Give user 3 seconds to see the expired message before redirecting
+      };
+
+      inactivityTimer.current = setTimeout(expireOnlyIfInactive, timeout);
     }
   }, [token, logout, showTimeoutWarning, getSessionTimeout, markActivity]);
+
+  // Share activity across tabs so one idle tab cannot expire an active shared session.
+  useEffect(() => {
+    const syncActivityFromOtherTab = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage || event.key !== LAST_ACTIVITY_KEY || !event.newValue || !token) return;
+      const activityAt = Number(event.newValue);
+      if (!Number.isFinite(activityAt) || activityAt <= 0) return;
+      lastActivityWrite.current = Math.max(lastActivityWrite.current, activityAt);
+      resetInactivityTimer();
+    };
+
+    window.addEventListener('storage', syncActivityFromOtherTab);
+    return () => window.removeEventListener('storage', syncActivityFromOtherTab);
+  }, [token, resetInactivityTimer]);
 
   // Refresh user from localStorage (called after settings update)
   const refreshUser = useCallback(() => {
@@ -506,7 +545,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleTimeout = () => {
     setShowTimeoutWarning(false);
     setShowExpiredModal(true);
-    setTimeout(() => {
+    logoutTimer.current = setTimeout(() => {
       logout(true);
     }, 3000); // Give user 3 seconds to see the expired message before redirecting
   };
