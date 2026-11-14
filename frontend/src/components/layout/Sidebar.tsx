@@ -78,17 +78,17 @@ interface SidebarProps {
 export function Sidebar({ isOpen, hasInteracted = false, onClose, demoMode = false, operationsMode = false }: SidebarProps) {
   const isMobile = useIsMobile();
   const location = useLocation();
-  const { user, isAdmin, isCashier, isManager, canAccessSettings, canAccessOperations, canAccessDesktopWorkspace } = useAuth();
+  const { user, token, isAdmin, isCashier, isManager, canAccessSettings, canAccessOperations, canAccessDesktopWorkspace } = useAuth();
   const [teamUnreadCount, setTeamUnreadCount] = useState(0);
   useEffect(() => {
-    if (!user) return;
-    const refresh = () => api.get('/operations/unread-count')
+    if (!user || !token) return;
+    const refresh = () => api.get('/operations/unread-count', { headers: { Authorization: `Bearer ${token}` } })
       .then(response => setTeamUnreadCount(Number(response.data.count) || 0))
       .catch(() => undefined);
     void refresh();
     const timer = window.setInterval(refresh, 20000);
     return () => window.clearInterval(timer);
-  }, [user?.id]);
+  }, [user?.id, token]);
 
   // Filter main navigation based on role
   const visibleNavigation = demoMode || operationsMode ? operationsNavigation : navigation.filter(item => {
