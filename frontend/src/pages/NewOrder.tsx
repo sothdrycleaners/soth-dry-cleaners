@@ -2054,10 +2054,7 @@ export default function NewOrder() {
             {/* Items grid. Capped on phones so the cart below stays reachable;
                 on desktop it simply fills the remaining column height. */}
             <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 min-h-0 max-h-[60vh] lg:max-h-none">
-              <div
-                className="grid min-w-0 gap-2"
-                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 155px), 1fr))' }}
-              >
+              <div className="grid min-w-0 grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
                 {filteredPriceItems.map((item) => (
                   <div
                     key={item.id}
@@ -2068,14 +2065,14 @@ export default function NewOrder() {
                       {item.name}
                     </p>
                     <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-1">
-                      <span className="text-[11px] lg:text-[10px] text-muted-foreground capitalize">
+                      <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground capitalize lg:text-[10px]">
                         {item.category === 'home_services' ? 'Home' : item.category}
                       </span>
-                      <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 capitalize">
+                      <Badge variant="outline" className="h-auto min-w-0 max-w-full whitespace-normal break-words px-1 py-0 text-[10px] leading-tight capitalize">
                         {item.unit || 'piece'}
                       </Badge>
                       {item.has_active_discount && (
-                        <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                        <Badge variant="secondary" className="h-auto min-w-0 max-w-full whitespace-normal break-words px-1 py-0 text-[10px] leading-tight bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
                           -{item.discount_percentage}%
                         </Badge>
                       )}
