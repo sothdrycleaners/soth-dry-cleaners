@@ -1588,51 +1588,28 @@ export default function NewOrder() {
                             </button>
                           </div>
                         )}
-                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') && (
-                          <span className="text-[10px] text-muted-foreground sm:shrink-0">
-                            {getLineDiscountMode(item) === 'percent' ? 'Discount %' : 'Discount UGX'}
-                          </span>
-                        )}
                         {(!canPriceUp || getItemAdjMode(index) === 'bargain') && allowedItemDiscountMode === 'both' && (
-                          <div className="flex w-full overflow-hidden rounded-md border sm:w-auto">
+                          <div className="flex w-full max-w-24 shrink-0 overflow-hidden rounded-md border sm:w-auto">
                             <button
                               type="button"
                               aria-pressed={getLineDiscountMode(item) === 'percent'}
                               onClick={() => switchItemDiscountMode(index, 'percent')}
-                              className={`flex-1 px-2 py-1 text-[10px] font-semibold sm:flex-none ${getLineDiscountMode(item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              title="Discount by percentage"
+                              aria-label="Discount by percentage"
+                              className={`flex-1 px-2 py-1 text-xs font-semibold sm:flex-none ${getLineDiscountMode(item) === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                             >
-                              Percentage
+                              %
                             </button>
                             <button
                               type="button"
                               aria-pressed={getLineDiscountMode(item) === 'amount'}
                               onClick={() => switchItemDiscountMode(index, 'amount')}
-                              className={`flex-1 border-l px-2 py-1 text-[10px] font-semibold sm:flex-none ${getLineDiscountMode(item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                              title="Discount by fixed UGX amount"
+                              aria-label="Discount by fixed UGX amount"
+                              className={`flex-1 border-l px-2 py-1 text-xs font-semibold sm:flex-none ${getLineDiscountMode(item) === 'amount' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                             >
-                              Fixed UGX
+                              UGX
                             </button>
-                          </div>
-                        )}
-                        {(!canPriceUp || getItemAdjMode(index) === 'bargain') &&
-                          getLineDiscountMode(item) === 'percent' && maxItemDiscountPercent >= 50 && (
-                          <div className="order-last flex min-w-0 w-full flex-wrap items-center gap-1 sm:order-none sm:w-auto sm:shrink-0">
-                            {[50, 100].filter((percent) => percent <= maxItemDiscountPercent).map((percent) => (
-                              <Button
-                                key={percent}
-                                type="button"
-                                size="sm"
-                                variant={item.item_discount_percent === percent ? 'default' : 'outline'}
-                                className="h-7 px-2 text-[10px]"
-                                onClick={() => updateItemDiscountPercent(index, percent)}
-                                title={`Apply ${percent}% discount to this item only`}
-                              >
-                                {percent}%
-                              </Button>
-                            ))}
-                            {Number(item.item_discount_percent) > 0 && (
-                              <Button type="button" size="sm" variant="ghost" className="h-7 px-1.5 text-[10px]"
-                                onClick={() => updateItemDiscountPercent(index, 0)} title="Clear this item discount">Clear</Button>
-                            )}
                           </div>
                         )}
                         <Input
