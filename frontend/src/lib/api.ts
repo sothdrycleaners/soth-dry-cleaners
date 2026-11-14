@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosHeaders } from 'axios';
 
 const devApiUrl = import.meta.env.DEV ? import.meta.env.VITE_API_URL : undefined;
 
@@ -29,7 +29,8 @@ api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('soth_token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers = AxiosHeaders.from(config.headers);
+      config.headers.set('Authorization', `Bearer ${token}`);
     }
     return config;
   },

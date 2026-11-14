@@ -30,7 +30,10 @@ type ChatMessage = {
 const timeLabel = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
 
 export default function TeamMessagesPanel({ operationsWorkspace = false }: { operationsWorkspace?: boolean }) {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
+  const getAuthConfig = useCallback(() => ({
+    headers: { Authorization: token ? `Bearer ${token}` : '' },
+  }), [token]);
   const [params, setParams] = useSearchParams();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -48,13 +51,14 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
   const peerId = Number(params.get('peer')) || 0;
 
   const loadContacts = useCallback(async () => {
+    if (!token) return;
     try {
-      const response = await api.get('/operations/contacts' + (operationsWorkspace ? '?workspace=operations' : ''));
+      const response = await api.get('/operations/contacts' + (operationsWorkspace ? '?workspace=operations' : ''), getAuthConfig());
       setContacts(response.data.contacts || []);
     } catch (e: any) {
       setError(e.response?.data?.error || 'Unable to load staff contacts');
     }
-  }, [operationsWorkspace]);
+  }, [getAuthConfig, operationsWorkspace, token]);
 
   const loadConversation = useCallback(async () => {
     if (!peerId) {
@@ -63,8 +67,9 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
       setConversationPeerId(0);
       return;
     }
+    if (!token) return;
     try {
-      const response = await api.get('/operations/conversations/' + peerId + (operationsWorkspace ? '?workspace=operations' : ''));
+      const response = await api.get('/operations/conversations/' + peerId + (operationsWorkspace ? '?workspace=operations' : ''), getAuthConfig());
       const incoming: ChatMessage[] = response.data.messages || [];
       setMessages((current) => {
         if (conversationPeerId !== peerId) return incoming;
@@ -77,7 +82,7 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
     } catch (e: any) {
       setError(e.response?.data?.error || 'Unable to load this conversation');
     }
-  }, [peerId, loadContacts, conversationPeerId, operationsWorkspace]);
+  }, [peerId, loadContacts, conversationPeerId, operationsWorkspace, getAuthConfig, token]);
 
   useEffect(() => {
     void loadContacts();
@@ -117,10 +122,10 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
   };
 
   const loadOlder = async () => {
-    if (!peerId || !messages.length || loadingOlder) return;
+    if (!token || !peerId || !messages.length || loadingOlder) return;
     setLoadingOlder(true);
     try {
-      const response = await api.get('/operations/conversations/' + peerId + '?before=' + messages[0].id + (operationsWorkspace ? '&workspace=operations' : ''));
+      const response = await api.get('/operations/conversations/' + peerId + '?before=' + messages[0].id + (operationsWorkspace ? '&workspace=operations' : ''), getAuthConfig());
       const older: ChatMessage[] = response.data.messages || [];
       setMessages((current) => {
         const byId = new Map([...older, ...current].map((message) => [message.id, message]));
@@ -136,11 +141,11 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    if (!draft.trim() || !peerId) return;
+    if (!token || !draft.trim() || !peerId) return;
     setSending(true);
     setError('');
     try {
-      await api.post('/operations/direct-messages', { recipient_id: peerId, message: draft.trim(), sender_context: operationsWorkspace ? 'OPERATIONS' : 'STAFF' });
+      await api.post('/operations/direct-messages', { recipient_id: peerId, message: draft.trim(), sender_context: operationsWorkspace ? 'OPERATIONS' : 'STAFF' }, getAuthConfig());
       setDraft('');
       await loadConversation();
       await loadContacts();
@@ -152,10 +157,10 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
   };
 
   const saveEditedMessage = async () => {
-    if (!editingMessageId || !editDraft.trim()) return;
+    if (!token || !editingMessageId || !editDraft.trim()) return;
     setSavingEdit(true);
     try {
-      await api.patch('/operations/direct-messages/' + editingMessageId, { message: editDraft.trim() });
+      await api.patch('/operations/direct-messages/' + editingMessageId, { message: editDraft.trim() }, getAuthConfig());
       setEditingMessageId(null);
       setEditDraft('');
       await loadConversation();
@@ -168,9 +173,9 @@ export default function TeamMessagesPanel({ operationsWorkspace = false }: { ope
   };
 
   const unsendMessage = async (messageId: number) => {
-    if (!window.confirm('Unsend this message for everyone in the conversation?')) return;
+    if (!token || !window.confirm('Unsend this message for everyone in the conversation?')) return;
     try {
-      await api.delete('/operations/direct-messages/' + messageId);
+      await api.delete('/operations/direct-messages/' + messageId, getAuthConfig());
       await loadConversation();
       await loadContacts();
     } catch (e: any) {
