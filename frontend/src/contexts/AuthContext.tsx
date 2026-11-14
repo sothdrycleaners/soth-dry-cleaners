@@ -298,6 +298,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [resetInactivityTimer]);
 
+  // A browser-toolbar refresh does not trigger the document's mouse/keyboard activity listeners.
+  // Record it before the document unloads so boot-time inactivity checks don't mistake a refresh
+  // for an idle session. The timeout still expires normally if the user leaves the app idle.
+  useEffect(() => {
+    const recordPageExitActivity = () => {
+      if (!localStorage.getItem(TOKEN_KEY)) return;
+      const now = Date.now();
+      localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+      lastActivityWrite.current = now;
+    };
+
+    window.addEventListener('pagehide', recordPageExitActivity);
+    return () => window.removeEventListener('pagehide', recordPageExitActivity);
+  }, []);
+
   // Load user from localStorage on mount
   useEffect(() => {
     const storedToken = localStorage.getItem(TOKEN_KEY);
