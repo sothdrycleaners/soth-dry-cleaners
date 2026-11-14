@@ -91,19 +91,6 @@ const POST_LOGIN_REDIRECT_REASON_KEY = 'soth_post_login_redirect_reason';
 // Writing on every scroll/click event would thrash localStorage
 const ACTIVITY_WRITE_INTERVAL = 5 * 1000;
 
-/** Expiry claim from the JWT, in milliseconds, or null if it cannot be read */
-function readTokenExpiry(token: string): number | null {
-  try {
-    const payload = token.split('.')[1];
-    if (!payload) return null;
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    const claims = JSON.parse(json);
-    return typeof claims.exp === 'number' ? claims.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
 function storePostLoginRedirect() {
   if (typeof window === 'undefined') return;
 
@@ -171,18 +158,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
   }, []);
 
-  const isSessionStale = useCallback(
-    (storedToken: string) => {
-      const expiry = readTokenExpiry(storedToken);
-      if (expiry !== null && Date.now() >= expiry) return true;
+  // The backend is authoritative for JWT expiry. The browser only enforces the
+  // configured inactivity timeout; client clock skew must not erase a valid token.
+  const isSessionStale = useCallback(() => {
+    const lastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
+    if (!Number.isFinite(lastActivity) || lastActivity <= 0) return false;
 
-      const lastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
-      if (!Number.isFinite(lastActivity) || lastActivity <= 0) return false;
-
-      return Date.now() - lastActivity > getSessionTimeout();
-    },
-    [getSessionTimeout]
-  );
+    return Date.now() - lastActivity > getSessionTimeout();
+  }, [getSessionTimeout]);
 
   // Logout function (defined before resetInactivityTimer to avoid dependency issues)
   const logout = useCallback((preserveRedirect = false) => {
@@ -360,7 +343,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (storedToken && storedUser) {
       // Check staleness before restoring, otherwise a session that expired while
       // the app was closed would silently resume.
-      if (isSessionStale(storedToken)) {
+      if (isSessionStale()) {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
         localStorage.removeItem(LAST_ACTIVITY_KEY);
@@ -432,7 +415,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const checkOnReturn = () => {
       if (document.visibilityState !== 'visible') return;
       const storedToken = localStorage.getItem(TOKEN_KEY);
-      if (storedToken && isSessionStale(storedToken)) {
+      if (storedToken && isSessionStale()) {
         logout(true);
       }
     };
