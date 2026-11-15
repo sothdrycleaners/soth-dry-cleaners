@@ -286,6 +286,13 @@ export default function NewOrder() {
 
   // Order state
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const cartPanelRef = useRef<HTMLDivElement>(null);
+  const catalogPanelRef = useRef<HTMLDivElement>(null);
+
+  const jumpToMobilePanel = (panel: 'cart' | 'catalog') => {
+    const target = panel === 'cart' ? cartPanelRef.current : catalogPanelRef.current;
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   const [globalKgMode, setGlobalKgMode] = useState(false);
   const [catalogueKg, setCatalogueKg] = useState(0);
   const [standardKgRate, setStandardKgRate] = useState(10000);
@@ -1430,6 +1437,33 @@ export default function NewOrder() {
           )}
         </div>
 
+        {/* Mobile-only jump controls keep both POS sections one tap away. */}
+        <div className="sticky top-14 z-20 -mx-3 flex gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 min-w-0 flex-1 justify-center gap-2 text-xs font-semibold"
+            onClick={() => jumpToMobilePanel('catalog')}
+            aria-label="Jump to item catalog"
+          >
+            <Search className="h-4 w-4 shrink-0" />
+            <span>Catalog</span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 min-w-0 flex-1 justify-center gap-2 text-xs font-semibold"
+            onClick={() => jumpToMobilePanel('cart')}
+            aria-label={`Jump to selected order items${orderItems.length ? `, ${orderItems.length} lines` : ''}`}
+          >
+            <ShoppingCart className="h-4 w-4 shrink-0" />
+            <span>Order items</span>
+            <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1 text-[10px]">
+              {orderItems.length}
+            </Badge>
+          </Button>
+        </div>
+
         {/* Main POS split: Left = Cart/Payment, Right = Item Catalog */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-3 min-w-0 lg:min-h-0">
           
@@ -1439,7 +1473,7 @@ export default function NewOrder() {
           <div className="order-2 lg:order-1 lg:col-span-2 flex min-w-0 flex-col gap-3 overflow-y-auto">
             
             {/* Cart Items */}
-            <div className="bg-card border rounded-lg">
+            <div ref={cartPanelRef} id="new-order-cart" className="scroll-mt-28 bg-card border rounded-lg">
               <div className="px-4 py-2 border-b flex items-center justify-between">
                 <h3 className="font-semibold flex items-center gap-2 text-sm">
                   <ShoppingCart className="h-4 w-4" />
@@ -2202,7 +2236,7 @@ export default function NewOrder() {
           </div>
 
           {/* ===== RIGHT PANEL: Item Catalog (3/5 width) ===== */}
-          <div className="order-1 lg:order-2 lg:col-span-3 flex min-w-0 flex-col min-h-0 bg-card border rounded-lg">
+          <div ref={catalogPanelRef} id="new-order-catalog" className="order-1 lg:order-2 lg:col-span-3 flex min-w-0 flex-col min-h-0 scroll-mt-28 bg-card border rounded-lg">
             
             {/* Category Tabs + Search */}
             <div className="px-3 pt-3 pb-2 border-b space-y-2 shrink-0">
