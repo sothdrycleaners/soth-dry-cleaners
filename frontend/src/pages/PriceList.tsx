@@ -351,12 +351,15 @@ export default function PriceList() {
       return;
     }
 
-    const duplicate = items.find((item) => normalizeName(item.name) === normalizeName(formData.name));
+    const duplicate = items.find((item) =>
+      normalizeName(item.name) === normalizeName(formData.name) &&
+      normalizeName(item.category) === normalizeName(formData.category)
+    );
     if (duplicate) {
       toast({
         variant: 'destructive',
         title: 'Item already exists',
-        description: `"${duplicate.name}" is already in the price list. Edit that item instead of adding it again.`,
+        description: `"${duplicate.name}" already exists in ${getCategoryLabel(formData.category)}. Edit that item or use a distinct item name.`,
       });
       return;
     }

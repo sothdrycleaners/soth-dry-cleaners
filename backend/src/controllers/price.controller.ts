@@ -127,23 +127,28 @@ export const createPrice = async (req: AuthRequest, res: Response) => {
     let { item_id, ironing_price, name } = req.body;
 
     name = String(name || '').trim().replace(/\s+/g, ' ');
+    const normalizedCategory = String(category || '').trim().replace(/\s+/g, ' ').toLowerCase();
     if (!name) {
       return res.status(400).json({ error: 'Item name is required' });
     }
+    if (!normalizedCategory) {
+      return res.status(400).json({ error: 'Item category is required' });
+    }
 
-    // Item names must be unique (case/spacing insensitive) so the price list
-    // never ends up with two "Doctor Suit" rows staff cannot tell apart.
+    // Item names are unique within a tenant and category; other categories may reuse a name.
     const duplicate = await query(
       `SELECT id, name, is_active FROM price_items
-       WHERE LOWER(TRIM(name)) = LOWER($1) AND tenant_id = $2 LIMIT 1`,
-      [name, tenantId]
+       WHERE LOWER(REGEXP_REPLACE(TRIM(name), '[[:space:]]+', ' ', 'g')) = LOWER($1)
+         AND LOWER(REGEXP_REPLACE(TRIM(COALESCE(category::text, '')), '[[:space:]]+', ' ', 'g')) = LOWER($2)
+         AND tenant_id = $3 LIMIT 1`,
+      [name, normalizedCategory, tenantId]
     );
     if (duplicate.rows.length > 0) {
       const existing = duplicate.rows[0];
       return res.status(409).json({
         error: existing.is_active
-          ? `"${existing.name}" already exists in the price list. Edit that item instead of adding it again.`
-          : `"${existing.name}" already exists but is deactivated. Reactivate it instead of adding a duplicate.`,
+          ? `"${existing.name}" already exists in the ${normalizedCategory} category. Edit that item instead of adding it again.`
+          : `"${existing.name}" already exists but is deactivated in the ${normalizedCategory} category. Reactivate it instead of adding a duplicate.`,
         code: 'DUPLICATE_ITEM_NAME',
         existingId: existing.id,
         existingIsActive: existing.is_active,
@@ -152,7 +157,7 @@ export const createPrice = async (req: AuthRequest, res: Response) => {
 
     // Auto-generate item_id when not provided (UI expects this)
     if (!item_id || String(item_id).trim() === '') {
-      item_id = await generateNextItemId(category, tenantId);
+      item_id = await generateNextItemId(normalizedCategory, tenantId);
     }
 
     // Default ironing to half wash price when omitted
@@ -167,14 +172,16 @@ export const createPrice = async (req: AuthRequest, res: Response) => {
       `INSERT INTO price_items (item_id, name, category, subcategory, unit, price, ironing_price, express_price, pricing_type, price_per_kg, tenant_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [item_id, name, category, subcategory || null, unit, price, ironing_price, express_price ?? null, resolvedPricingType, resolvedPricePerKg, tenantId]
+      [item_id, name, normalizedCategory, subcategory || null, unit, price, ironing_price, express_price ?? null, resolvedPricingType, resolvedPricePerKg, tenantId]
     );
-    
     res.status(201).json({
       message: 'Price item created successfully',
       price: result.rows[0],
     });
   } catch (error: any) {
+    if (error.code === '23505' && error.constraint === 'price_items_tenant_category_name_key') {
+      return res.status(409).json({ error: 'An item with this name already exists in this category.', code: 'DUPLICATE_ITEM_NAME_IN_CATEGORY' });
+    }
     if (error.message?.includes('duplicate key')) {
       return res.status(409).json({ error: 'Item ID already exists' });
     }
@@ -192,43 +199,72 @@ export const updatePrice = async (req: AuthRequest, res: Response) => {
     }
     
     const { id } = req.params;
-    const { 
-      name, 
-      category, 
-      subcategory, 
+    const {
+      name,
+      category,
+      subcategory,
       unit,
-      price, 
+      price,
       ironing_price,
       express_price,
       is_active,
       discount_percentage,
       discount_start_date,
-      discount_end_date 
+      discount_end_date
     } = req.body;
-    
-    const updates: string[] = [];
-    const values: any[] = [];
-    let paramCount = 1;
-    
-    if (name) {
-      const cleanName = String(name).trim().replace(/\s+/g, ' ');
+
+    const currentItem = await query(
+      'SELECT id, name, category FROM price_items WHERE id = $1 AND tenant_id = $2 LIMIT 1',
+      [id, tenantId]
+    );
+    if (!currentItem.rows.length) {
+      return res.status(404).json({ error: 'Price item not found' });
+    }
+
+    const cleanName = name !== undefined
+      ? String(name).trim().replace(/\s+/g, ' ')
+      : currentItem.rows[0].name;
+    const cleanCategory = category !== undefined
+      ? String(category).trim().replace(/\s+/g, ' ').toLowerCase()
+      : String(currentItem.rows[0].category || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Item name is required' });
+    }
+    if (!cleanCategory) {
+      return res.status(400).json({ error: 'Item category is required' });
+    }
+
+    const currentNameKey = String(currentItem.rows[0].name).trim().replace(/\s+/g, ' ').toLowerCase();
+    const currentCategoryKey = String(currentItem.rows[0].category || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const identityChanged = cleanName.toLowerCase() !== currentNameKey || cleanCategory !== currentCategoryKey;
+
+    if (identityChanged) {
       const duplicate = await query(
         `SELECT id, name FROM price_items
-         WHERE LOWER(TRIM(name)) = LOWER($1) AND id <> $2 AND tenant_id = $3 LIMIT 1`,
-        [cleanName, id, tenantId]
+         WHERE LOWER(REGEXP_REPLACE(TRIM(name), '[[:space:]]+', ' ', 'g')) = LOWER($1)
+           AND LOWER(REGEXP_REPLACE(TRIM(COALESCE(category::text, '')), '[[:space:]]+', ' ', 'g')) = LOWER($2)
+           AND id <> $3 AND tenant_id = $4 LIMIT 1`,
+        [cleanName, cleanCategory, id, tenantId]
       );
       if (duplicate.rows.length > 0) {
         return res.status(409).json({
-          error: `Another price list item is already named "${duplicate.rows[0].name}".`,
-          code: 'DUPLICATE_ITEM_NAME',
+          error: `Another item named "${duplicate.rows[0].name}" already exists in the ${cleanCategory} category.`,
+          code: 'DUPLICATE_ITEM_NAME_IN_CATEGORY',
         });
       }
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    if (name !== undefined) {
       updates.push(`name = $${paramCount++}`);
       values.push(cleanName);
     }
-    if (category) {
+    if (category !== undefined) {
       updates.push(`category = $${paramCount++}`);
-      values.push(category);
+      values.push(cleanCategory);
     }
     if (subcategory !== undefined) {
       updates.push(`subcategory = $${paramCount++}`);
@@ -300,7 +336,10 @@ export const updatePrice = async (req: AuthRequest, res: Response) => {
       message: 'Price item updated successfully',
       price: result.rows[0],
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.code === '23505' && error.constraint === 'price_items_tenant_category_name_key') {
+      return res.status(409).json({ error: 'An item with this name already exists in this category.', code: 'DUPLICATE_ITEM_NAME_IN_CATEGORY' });
+    }
     console.error('Update price error:', error);
     res.status(500).json({ error: 'Failed to update price' });
   }

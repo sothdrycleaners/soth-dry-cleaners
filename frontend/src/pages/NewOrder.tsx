@@ -1216,7 +1216,8 @@ export default function NewOrder() {
       // Automatically download invoices only for newly created day-to-day
       // orders. Historical orders remain available for manual invoice download
       // from Orders, and duplicate retries must not trigger another download.
-      if (order?.id && order.is_backdated !== true) {
+      const isMobileViewport = window.matchMedia('(max-width: 767px)').matches;
+      if (order?.id && order.is_backdated !== true && !isMobileViewport) {
         setInvoiceDownloadOrderId(Number(order.id));
       }
 
@@ -1291,8 +1292,6 @@ export default function NewOrder() {
           message,
         });
         setWhatsappDialogOpen(true);
-        // Open WhatsApp Messenger immediately so staff can send from their phone
-        sendOrderViaWhatsApp(customerSnapshot.phone, message);
       } else {
         toast({
           variant: 'destructive',
@@ -2536,8 +2535,8 @@ export default function NewOrder() {
             </DialogTitle>
             <DialogDescription>
               {pendingWhatsApp
-                ? `Order ${pendingWhatsApp.orderNumber} for ${pendingWhatsApp.customerName}. WhatsApp should open with the confirmation message ready — tap Send on your phone.`
-                : 'Send the order confirmation on WhatsApp.'}
+                ? `Order ${pendingWhatsApp.orderNumber} for ${pendingWhatsApp.customerName}. Choose Open WhatsApp to prepare the confirmation message, or Done to continue.`
+                : 'Choose whether to open WhatsApp with the order confirmation.'}
             </DialogDescription>
           </DialogHeader>
           {pendingWhatsApp && (
@@ -2576,7 +2575,7 @@ export default function NewOrder() {
               }}
             >
               <MessageCircle className="mr-2 h-4 w-4" />
-              Open WhatsApp Again
+              Open WhatsApp
             </Button>
           </DialogFooter>
         </DialogContent>
