@@ -81,8 +81,8 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
       `INSERT INTO expenses
        (expense_date, category, description, amount, payment_method, receipt_number, submitted_by,
         status, approval_status, approved_by, approved_at, created_at, branch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9,
-         CASE WHEN $8 = 'APPROVED' THEN NOW() ELSE NULL END, NOW(), $10)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text, $8::text, $9,
+         CASE WHEN $8::text = 'APPROVED' THEN NOW() ELSE NULL END, NOW(), $10)
        RETURNING id, expense_date, description, amount, status, approval_status, approved_by, approved_at, branch_id`,
       [expense_date || new Date(), category, description, amount, payment_method || 'CASH', receipt_number, userId, initialStatus, isAdminEntry ? userId : null, branchId]
     );
