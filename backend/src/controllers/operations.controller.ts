@@ -39,7 +39,11 @@ async function listOrders(req: AuthRequest, delivered = false) {
   const { page, limit, offset } = pageOptions(req);
   const values: unknown[] = [];
   let where = delivered ? "upper(o.status::text)='DELIVERED'" : "upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')";
-  where += dateSql(req, 'COALESCE(o.recorded_at,o.created_at)', values);
+  // Historical queue orders belong by business date; delivered history keeps its existing recorded-date behavior.
+  const orderDateExpression = delivered
+    ? 'COALESCE(o.recorded_at,o.created_at)'
+    : 'COALESCE(o.created_at,o.recorded_at)';
+  where += dateSql(req, orderDateExpression, values);
   const branchId = branchIdFor(req);
   if (branchId !== null) { values.push(branchId); where += ` AND o.branch_id=$${values.length}`; }
   const search = String(req.query.search || '').trim();
@@ -62,7 +66,7 @@ async function listOrders(req: AuthRequest, delivered = false) {
   const result = await query(
     `SELECT o.id,o.order_number,o.status order_status,o.notes order_note,
       COALESCE(bool_or(upper(COALESCE(oi.service_type,''))='EXPRESS'),FALSE) is_express,o.branch_id,b.name branch_name,
-      COALESCE(o.recorded_at,o.created_at) received_at,o.due_date,
+      ${orderDateExpression} received_at,o.due_date,
       c.name customer_name,c.customer_id customer_number,u.full_name recorded_by,
       COALESCE(json_agg(json_build_object('id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,'service_type',oi.service_type,'express_due_at',oi.express_due_at,
         'status',CASE WHEN upper(o.status::text) IN ('READY','DELIVERED') THEN 'READY' WHEN upper(o.status::text)='PROCESSING' AND COALESCE(os.status,'RECEIVED')='RECEIVED' THEN 'PROCESSING' ELSE COALESCE(os.status,'RECEIVED') END,
@@ -75,7 +79,7 @@ async function listOrders(req: AuthRequest, delivered = false) {
      LEFT JOIN public.price_items pi ON pi.id=oi.price_item_id AND pi.tenant_id=oi.tenant_id
      LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
      WHERE ${where} GROUP BY o.id,c.id,b.id,u.id
-     ORDER BY COALESCE(o.recorded_at,o.created_at) DESC,o.id DESC
+     ORDER BY ${orderDateExpression} DESC,o.id DESC
      LIMIT $${values.length+1} OFFSET $${values.length+2}`,
     [...values, limit, offset]
   );
@@ -105,7 +109,7 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
     const startedOrders = await query(
       `SELECT o.id,o.order_number,o.status order_status,
         COALESCE(bool_or(upper(COALESCE(oi.service_type,''))='EXPRESS'),FALSE) is_express,
-        o.branch_id,b.name branch_name,COALESCE(o.recorded_at,o.created_at) received_at,
+        o.branch_id,b.name branch_name,COALESCE(o.created_at,o.recorded_at) received_at,
         c.name customer_name,
         COALESCE(json_agg(json_build_object(
           'id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,
