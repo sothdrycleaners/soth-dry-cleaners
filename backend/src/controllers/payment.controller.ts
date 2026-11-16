@@ -1002,9 +1002,9 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
     const todayYmd = kampalaTodayYmd();
     const requestedPaymentYmd = extractYmd(payment_date);
     const isHistoricalPayment = historical_payment === true || historical_payment === 'true';
-    if (isHistoricalPayment && req.user?.role !== 'ADMIN' && req.user?.role !== 'MANAGER') {
+    if (isHistoricalPayment && req.user?.role !== 'ADMIN' && req.user?.role !== 'MANAGER' && !order.is_backdated) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Only administrators and managers can record a historical payment.' });
+      return res.status(403).json({ error: 'Desktop agents can backdate payments only for historical orders.' });
     }
     if (isHistoricalPayment && (!requestedPaymentYmd || requestedPaymentYmd >= todayYmd)) {
       await client.query('ROLLBACK');
