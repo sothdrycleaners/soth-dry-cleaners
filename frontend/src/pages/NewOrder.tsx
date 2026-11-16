@@ -1228,8 +1228,8 @@ export default function NewOrder() {
         notes,
         branch_id: selectedBranchId ? Number(selectedBranchId) : undefined,
         ...(canBackdate && useBackdate ? { order_date: orderDate } : {}),
-        historical_payment: historicalPayment && amountPaid > 0 && (canChooseBranch || isHistoricalOrder),
-        ...(historicalPayment && amountPaid > 0 && (canChooseBranch || isHistoricalOrder)
+        historical_payment: historicalPayment && amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT',
+        ...(historicalPayment && amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT'
           ? { payment_date: historicalPaymentDate }
           : {}),
       };
@@ -2227,7 +2227,7 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {/* Backdate toggle — admin / manager only */}
+              {/* The order date and initial payment date are independently backdatable. */}
               {canBackdate && (
                 <div className="border border-dashed border-amber-400 rounded-lg px-3 py-2 bg-amber-50 dark:bg-amber-950/30">
                   <div className="flex items-center gap-2">
@@ -2237,7 +2237,7 @@ export default function NewOrder() {
                       onCheckedChange={(v) => setUseBackdate(!!v)}
                     />
                     <label htmlFor="use-backdate" className="text-xs font-medium text-amber-700 dark:text-amber-300 cursor-pointer select-none">
-                      Record for a past date (historical entry)
+                      Record order as past date
                     </label>
                   </div>
                   {useBackdate && (
@@ -2255,7 +2255,7 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {(canChooseBranch || isHistoricalOrder) && amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT' && (
+              {amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT' && (
                 <div className="border border-dashed border-blue-400 rounded-lg px-3 py-2 bg-blue-50 dark:bg-blue-950/30">
                   <div className="flex items-center gap-2">
                     <Checkbox id="historical-payment-create" checked={historicalPayment}
@@ -2268,7 +2268,7 @@ export default function NewOrder() {
                         }
                       }} />
                     <label htmlFor="historical-payment-create" className="text-xs font-medium cursor-pointer select-none">
-                      Payment was received on a past date
+                      Record payment as past date
                     </label>
                   </div>
                   {historicalPayment && <div className="mt-2 flex items-center gap-2">

@@ -1294,9 +1294,6 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       const todayYmd = kampalaTodayYmd();
       const requestedPaymentYmd = extractYmd(requestedCreatePaymentDate);
       const isHistoricalPayment = historical_payment === true || historical_payment === 'true';
-      if (isHistoricalPayment && req.user!.role !== 'ADMIN' && req.user!.role !== 'MANAGER' && !isBackdated) {
-        throw new Error('Desktop agents can backdate an initial payment only when creating a historical order.');
-      }
       if (isHistoricalPayment && (!requestedPaymentYmd || requestedPaymentYmd >= todayYmd)) {
         throw new Error('Choose a payment date earlier than today for a historical payment.');
       }
