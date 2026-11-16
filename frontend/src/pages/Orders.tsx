@@ -700,18 +700,23 @@ export default function Orders() {
   /** Full branch records — include payment_modes for per-branch WhatsApp receipts */
   const [branchList, setBranchList] = useState<Array<{
     id: number; name: string; phone?: string; email?: string;
-    location?: string; address?: string; color?: string;
+    location?: string; address?: string; color?: string; is_default?: boolean;
     payment_modes?: { centenary_account?: string; mtn_code?: string; airtel_merchant?: string };
   }>>([]);
+  const selectedOrderBranch = selectedOrder
+    ? branchList.find((branch) => Number(branch.id) === Number(selectedOrder.branch_id))
+    : undefined;
+  const selectedOrderPaymentModes = resolvePaymentModes(
+    selectedOrderBranch?.payment_modes,
+    paymentModes,
+    !selectedOrderBranch || Boolean(selectedOrderBranch.is_default)
+  );
   const [additionalPayment, setAdditionalPayment] = useState(0);
   const [recordingPayment, setRecordingPayment] = useState(false);
   const recordingPaymentRef = useRef(false);
   const [paymentDate, setPaymentDate] = useState(kampalaTodayYmd());
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY' | 'BANK_TRANSFER'>('CASH');
-  const [mobileMoneyProvider, setMobileMoneyProvider] = useState<'MTN' | 'AIRTEL'>('MTN');
-  const [paymentChannel, setPaymentChannel] = useState<'MANUAL' | 'MERCHANT' | 'P2P' | 'DEPOSIT' | 'API_PUSH'>('MANUAL');
-  const [recipientAccount, setRecipientAccount] = useState('');
-  const [senderPhone, setSenderPhone] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY_MTN' | 'MOBILE_MONEY_AIRTEL' | 'BANK_TRANSFER'>('CASH');
+  const [paymentChannel, setPaymentChannel] = useState<'' | 'MANUAL' | 'MERCHANT' | 'P2P' | 'DEPOSIT' | 'API_PUSH'>('');
   const [transactionReference, setTransactionReference] = useState('');
   const [newStatus, setNewStatus] = useState('');
   const [updatingOrderStatus, setUpdatingOrderStatus] = useState(false);
@@ -1420,11 +1425,8 @@ export default function Orders() {
       const newAmountPaid = currentPaid + additionalPayment;
       const newBalance = Math.max(0, totalAmount - newAmountPaid);
 
-      // Build payment method string with provider for mobile money
-      let finalPaymentMethod: string = paymentMethod;
-      if (paymentMethod === 'MOBILE_MONEY') {
-        finalPaymentMethod = `MOBILE_MONEY_${mobileMoneyProvider}`;
-      }
+      // Payment choices already carry the selected provider in their method code.
+      const finalPaymentMethod: string = paymentMethod;
 
       await axios.post(
         `${API_BASE_URL}/payments/order/${selectedOrder.id}`,
@@ -1434,15 +1436,16 @@ export default function Orders() {
           historical_payment: paymentDate < kampalaTodayYmd(),
           payment_date: paymentDate,
           transaction_reference: transactionReference || null,
+          notes: paymentChannel ? `How received: ${paymentChannel.replace(/_/g, ' ')}` : null,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      const paymentMethodDisplay = paymentMethod === 'MOBILE_MONEY' 
-        ? `${mobileMoneyProvider} Mobile Money` 
-        : paymentMethod.replace('_', ' ');
+      const paymentMethodDisplay = paymentMethod === 'MOBILE_MONEY_MTN' ? 'MTN MoMo'
+        : paymentMethod === 'MOBILE_MONEY_AIRTEL' ? 'Airtel Pay'
+        : paymentMethod.replace(/_/g, ' ');
 
-      const channelDisplay = paymentChannel === 'MERCHANT' ? ' via *165#/*185#' :
+      const channelDisplay = paymentChannel === 'MERCHANT' ? (paymentMethod === 'MOBILE_MONEY_MTN' ? ' via MTN merchant code' : ' via Airtel merchant code') :
                             paymentChannel === 'P2P' ? ' (P2P)' :
                             paymentChannel === 'DEPOSIT' ? ' (Agent Deposit)' : '';
 
@@ -1454,10 +1457,7 @@ export default function Orders() {
       setShowPaymentDialog(false);
       setAdditionalPayment(0);
       setPaymentMethod('CASH');
-      setMobileMoneyProvider('MTN');
-      setPaymentChannel('MANUAL');
-      setRecipientAccount('');
-      setSenderPhone('');
+      setPaymentChannel('');
       setTransactionReference('');
       setPaymentDate(kampalaTodayYmd());
       fetchOrders();
@@ -2741,6 +2741,8 @@ export default function Orders() {
                       const remaining = Math.max(0, totalAmt - paidAmt);
                       setAdditionalPayment(remaining > 0 ? remaining : totalAmt);
                       setPaymentMethod('CASH');
+                      setPaymentChannel('');
+                      setTransactionReference('');
                       setPaymentDate(defaultPaymentYmd());
                       setShowPaymentDialog(true);
                     }}
@@ -3161,6 +3163,9 @@ export default function Orders() {
                           ? remaining
                           : parseFloat(String(selectedOrder.total_amount)) || 0
                       );
+                      setPaymentMethod('CASH');
+                      setPaymentChannel('');
+                      setTransactionReference('');
                       setPaymentDate(defaultPaymentYmd());
                       setShowPaymentDialog(true);
                     }}
@@ -3385,154 +3390,50 @@ export default function Orders() {
 
               <div>
                 <Label htmlFor="payment-method">Payment Method</Label>
-                <Select
-                  value={paymentMethod}
-                  onValueChange={(value: 'CASH' | 'MOBILE_MONEY' | 'BANK_TRANSFER') => setPaymentMethod(value)}
-                  disabled={recordingPayment}
-                >
-                  <SelectTrigger className="mt-2">
-                    <SelectValue placeholder="Select payment method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CASH">Cash</SelectItem>
-                    <SelectItem value="MOBILE_MONEY">Mobile Money (MTN/Airtel)</SelectItem>
-                    <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {paymentMethod === 'CASH' && '💵 Cash payment'}
-                  {paymentMethod === 'MOBILE_MONEY' && '📱 MTN Mobile Money or Airtel Money'}
-                  {paymentMethod === 'BANK_TRANSFER' && '🏦 Bank transfer'}
-                </p>
+                {(() => {
+                  const options = [
+                    { value: 'CASH' as const, label: 'Cash', style: 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' },
+                    ...(selectedOrderPaymentModes.mtn_code ? [{ value: 'MOBILE_MONEY_MTN' as const, label: 'MTN MoMo', style: 'border-yellow-500 bg-yellow-50 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-200' }] : []),
+                    ...(selectedOrderPaymentModes.airtel_merchant ? [{ value: 'MOBILE_MONEY_AIRTEL' as const, label: 'Airtel Pay', style: 'border-red-500 bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200' }] : []),
+                    ...(selectedOrderPaymentModes.centenary_account ? [{ value: 'BANK_TRANSFER' as const, label: 'Bank Transfer', style: 'border-blue-500 bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200' }] : []),
+                  ];
+                  return <div className="mt-2 grid grid-cols-2 gap-2">{options.map(({ value, label, style }) => (
+                    <button key={value} type="button" onClick={() => setPaymentMethod(value)} disabled={recordingPayment}
+                      className={'flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all disabled:opacity-50 ' + style + (paymentMethod === value ? ' shadow-sm ring-2 ring-offset-1' : ' opacity-80 hover:opacity-100')}>
+                      <span>{label}</span>
+                    </button>
+                  ))}</div>;
+                })()}
+                {paymentMethod === 'MOBILE_MONEY_MTN' && <p className="mt-1 text-xs text-muted-foreground">MTN MoMo Pay code: {selectedOrderPaymentModes.mtn_code}</p>}
+                {paymentMethod === 'MOBILE_MONEY_AIRTEL' && <p className="mt-1 text-xs text-muted-foreground">Airtel Pay code: {selectedOrderPaymentModes.airtel_merchant}</p>}
+                {paymentMethod === 'BANK_TRANSFER' && <p className="mt-1 text-xs text-muted-foreground">Bank account: {selectedOrderPaymentModes.centenary_account}</p>}
               </div>
 
-              {paymentMethod === 'MOBILE_MONEY' && (
-                <>
-                  <div>
-                    <Label htmlFor="mobile-provider">Mobile Money Provider</Label>
-                    <Select value={mobileMoneyProvider} onValueChange={(value: 'MTN' | 'AIRTEL') => setMobileMoneyProvider(value)} disabled={recordingPayment}>
-                      <SelectTrigger className="mt-2">
-                        <SelectValue placeholder="Select provider" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="MTN">MTN Mobile Money</SelectItem>
-                        <SelectItem value="AIRTEL">Airtel Money</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="payment-channel">How was payment received? ⭐</Label>
-                    <Select value={paymentChannel} onValueChange={(value: 'MANUAL' | 'MERCHANT' | 'P2P' | 'DEPOSIT' | 'API_PUSH') => setPaymentChannel(value)} disabled={recordingPayment}>
-                      <SelectTrigger className="mt-2">
-                        <SelectValue placeholder="Select payment channel" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="MERCHANT">
-                          <div className="flex items-center gap-2">
-                            <span>🏪</span>
-                            <div>
-                              <div className="font-medium">Merchant Code ({mobileMoneyProvider === 'MTN' ? '*165#' : '*185#'})</div>
-                              <div className="text-xs text-muted-foreground">Recommended - Customer paid via USSD code</div>
-                            </div>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="P2P">
-                          <div className="flex items-center gap-2">
-                            <span>📱</span>
-                            <div>
-                              <div className="font-medium">Phone Transfer (P2P)</div>
-                              <div className="text-xs text-muted-foreground">Customer sent money directly to your number</div>
-                            </div>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="DEPOSIT">
-                          <div className="flex items-center gap-2">
-                            <span>🏦</span>
-                            <div>
-                              <div className="font-medium">Agent Deposit</div>
-                              <div className="text-xs text-muted-foreground">Customer deposited cash at MoMo agent</div>
-                            </div>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="MANUAL">
-                          <div className="flex items-center gap-2">
-                            <span>✍️</span>
-                            <div>
-                              <div className="font-medium">Manual Entry</div>
-                              <div className="text-xs text-muted-foreground">Recording existing payment</div>
-                            </div>
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {paymentChannel === 'MERCHANT' && '✅ Best for reconciliation - structured reference'}
-                      {paymentChannel === 'P2P' && '⚠️ Requires manual matching with phone statement'}
-                      {paymentChannel === 'DEPOSIT' && '📍 Agent deposit to business account'}
-                      {paymentChannel === 'MANUAL' && 'Manual recording - specify details below'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="recipient-account">Which Business Account Received Payment?</Label>
-                    <Select value={recipientAccount} onValueChange={setRecipientAccount} disabled={recordingPayment}>
-                      <SelectTrigger className="mt-2">
-                        <SelectValue placeholder="Select business account" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {mobileMoneyProvider === 'MTN' ? (
-                          <>
-                            <SelectItem value="0772123456">0772 123 456 (MTN Main) - Primary</SelectItem>
-                            <SelectItem value="0777999888">0777 999 888 (MTN Secondary)</SelectItem>
-                          </>
-                        ) : (
-                          <>
-                            <SelectItem value="0755123456">0755 123 456 (Airtel Main) - Primary</SelectItem>
-                            <SelectItem value="0750999888">0750 999 888 (Airtel Secondary)</SelectItem>
-                          </>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Select which {mobileMoneyProvider} number received this payment
-                    </p>
-                  </div>
-
-                  {paymentChannel === 'P2P' && (
-                    <div>
-                      <Label htmlFor="sender-phone">Customer's Phone Number (Optional)</Label>
-                      <Input
-                        id="sender-phone"
-                        type="tel"
-                        value={senderPhone}
-                        onChange={(e) => setSenderPhone(e.target.value)}
-                        placeholder="+256 *** *** ***"
-                        className="mt-2"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Phone number that sent the money (for P2P tracking)
-                      </p>
-                    </div>
-                  )}
-                </>
+              {paymentMethod.startsWith('MOBILE_MONEY') && (
+                <details className="rounded-md border px-3 py-2">
+                  <summary className="cursor-pointer text-sm font-medium">How was payment received? (optional)</summary>
+                  <Select value={paymentChannel || 'NOT_SPECIFIED'}
+                    onValueChange={(value: string) => setPaymentChannel(value === 'NOT_SPECIFIED' ? '' : value as 'MANUAL' | 'MERCHANT' | 'P2P' | 'DEPOSIT' | 'API_PUSH')}
+                    disabled={recordingPayment}>
+                    <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NOT_SPECIFIED">Not specified</SelectItem>
+                      <SelectItem value="MERCHANT">Merchant code</SelectItem>
+                      <SelectItem value="P2P">Phone transfer (P2P)</SelectItem>
+                      <SelectItem value="DEPOSIT">Agent deposit</SelectItem>
+                      <SelectItem value="MANUAL">Manual entry</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </details>
               )}
 
-              {(paymentMethod === 'MOBILE_MONEY' || paymentMethod === 'BANK_TRANSFER') && (
+              {(paymentMethod.startsWith('MOBILE_MONEY') || paymentMethod === 'BANK_TRANSFER') && (
                 <div>
                   <Label htmlFor="transaction-ref">Transaction Reference (Optional)</Label>
-                  <Input
-                    id="transaction-ref"
-                    type="text"
-                    value={transactionReference}
+                  <Input id="transaction-ref" type="text" value={transactionReference}
                     onChange={(e) => setTransactionReference(e.target.value)}
-                    placeholder="e.g., MM12345678 or Bank Ref"
-                    className="mt-2"
-                    disabled={recordingPayment}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {paymentMethod === 'MOBILE_MONEY' ? 'Mobile money confirmation code' : 'Bank transfer reference number'}
-                  </p>
+                    placeholder={paymentMethod.startsWith('MOBILE_MONEY') ? 'Mobile money reference' : 'Bank transfer reference'}
+                    className="mt-2" disabled={recordingPayment} />
                 </div>
               )}
 

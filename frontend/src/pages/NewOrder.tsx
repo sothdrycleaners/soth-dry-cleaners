@@ -251,6 +251,12 @@ export default function NewOrder() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [paymentModes, setPaymentModes] = useState<PaymentModeDetails>(DEFAULT_PAYMENT_MODES);
+  const selectedPaymentBranch = branches.find((branch) => String(branch.id) === String(selectedBranchId));
+  const availablePaymentModes = resolvePaymentModes(
+    selectedPaymentBranch?.payment_modes,
+    paymentModes,
+    Boolean(selectedPaymentBranch?.is_default)
+  );
   const [openNoteIndexes, setOpenNoteIndexes] = useState<number[]>([]);
   const [expressDeadlineItemIndex, setExpressDeadlineItemIndex] = useState<number | null>(null);
   const [expressDeadlineDate, setExpressDeadlineDate] = useState('');
@@ -322,8 +328,7 @@ export default function NewOrder() {
   const [maxDiscountPercent, setMaxDiscountPercent] = useState(defaultMaxDiscountPercent);
   const [maxItemDiscountPercent, setMaxItemDiscountPercent] = useState(100);
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'UNPAID' | 'PARTIAL'>('UNPAID');
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'ON_ACCOUNT'>('ON_ACCOUNT');
-  const [mobileProvider, setMobileProvider] = useState<'MTN' | 'AIRTEL'>('MTN');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY_MTN' | 'MOBILE_MONEY_AIRTEL' | 'BANK_TRANSFER' | 'ON_ACCOUNT'>('ON_ACCOUNT');
   const [transactionRef, setTransactionRef] = useState('');
   const [amountPaid, setAmountPaid] = useState(0);
   const [notes, setNotes] = useState('');
@@ -1034,6 +1039,21 @@ export default function NewOrder() {
     setAmountPaid(value);
   };
 
+  useEffect(() => {
+    const modeIsSaved = paymentMethod === 'MOBILE_MONEY_MTN'
+      ? Boolean(availablePaymentModes.mtn_code)
+      : paymentMethod === 'MOBILE_MONEY_AIRTEL'
+        ? Boolean(availablePaymentModes.airtel_merchant)
+        : paymentMethod === 'BANK_TRANSFER'
+          ? Boolean(availablePaymentModes.centenary_account)
+          : true;
+    if (!modeIsSaved) {
+      setPaymentMethod('ON_ACCOUNT');
+      setAmountPaid(0);
+      setPaymentStatus('UNPAID');
+    }
+  }, [paymentMethod, availablePaymentModes.mtn_code, availablePaymentModes.airtel_merchant, availablePaymentModes.centenary_account]);
+
   // Handle quick add customer
   const handleQuickAddCustomer = async () => {
     const customerName = newCustomerForm.name.trim();
@@ -1221,7 +1241,7 @@ export default function NewOrder() {
         surcharge_percent: orderDiscountMode === 'percent' ? orderSurchargeAmount : 0,
         total_amount: total,
         payment_status: paymentStatus,
-        payment_method: paymentMethod === 'MOBILE_MONEY' ? `${paymentMethod}_${mobileProvider}` : paymentMethod,
+        payment_method: paymentMethod,
         amount_paid: Math.min(amountPaid, total),
         transaction_reference: transactionRef || null,
         notes,
@@ -2059,15 +2079,16 @@ export default function NewOrder() {
               {/* ── Payment Method ───────────────────────────────────────── */}
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground font-medium">Payment Method</Label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {(
                     [
-                      { value: 'ON_ACCOUNT', label: 'On Account', emoji: '📋', desc: 'Pay later' },
-                      { value: 'CASH',       label: 'Cash',       emoji: '💵', desc: 'At counter' },
-                      { value: 'MOBILE_MONEY', label: 'Mobile Money', emoji: '📱', desc: 'MTN/Airtel' },
-                      { value: 'BANK_TRANSFER', label: 'Bank Transfer', emoji: '🏦', desc: 'Wire / EFT' },
-                    ] as const
-                  ).map(({ value, label, emoji, desc }) => {
+                      { value: 'ON_ACCOUNT', label: 'On Account', emoji: '📋', desc: 'Pay later', style: 'border-slate-400 bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200' },
+                      { value: 'CASH', label: 'Cash', emoji: '💵', desc: 'Cash received', style: 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' },
+                      ...(availablePaymentModes.mtn_code ? [{ value: 'MOBILE_MONEY_MTN' as const, label: 'MTN MoMo', emoji: '📱', desc: 'MoMo Pay', style: 'border-yellow-500 bg-yellow-50 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-200' }] : []),
+                      ...(availablePaymentModes.airtel_merchant ? [{ value: 'MOBILE_MONEY_AIRTEL' as const, label: 'Airtel Pay', emoji: '📱', desc: 'Airtel Money', style: 'border-red-500 bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200' }] : []),
+                      ...(availablePaymentModes.centenary_account ? [{ value: 'BANK_TRANSFER' as const, label: 'Bank Transfer', emoji: '🏦', desc: 'Bank received', style: 'border-blue-500 bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200' }] : []),
+                    ]
+                  ).map(({ value, label, emoji, desc, style }) => {
                     const isSelected = paymentMethod === value;
                     return (
                       <button
@@ -2085,9 +2106,8 @@ export default function NewOrder() {
                         }}
                         className={cn(
                           'flex flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-2.5 text-center transition-all select-none',
-                          isSelected
-                            ? 'border-primary bg-primary/10 text-primary shadow-sm font-semibold'
-                            : 'border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                          style,
+                          isSelected ? 'shadow-sm ring-2 ring-offset-1 font-semibold' : 'opacity-80 hover:opacity-100'
                         )}
                       >
                         <span className="text-lg leading-none">{emoji}</span>
@@ -2099,35 +2119,19 @@ export default function NewOrder() {
                 </div>
               </div>
 
-              {/* Mobile money provider + ref */}
-              {paymentMethod === 'MOBILE_MONEY' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <Select value={mobileProvider} onValueChange={(v: 'MTN' | 'AIRTEL') => setMobileProvider(v)}>
-                    <SelectTrigger className="h-10 lg:h-8 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="MTN">MTN MoMo</SelectItem>
-                      <SelectItem value="AIRTEL">Airtel Money</SelectItem>
-                    </SelectContent>
-                  </Select>
+              {/* Mobile money and bank references are optional. */}
+              {(paymentMethod.startsWith('MOBILE_MONEY') || paymentMethod === 'BANK_TRANSFER') && (
+                <div className="space-y-1">
                   <Input
                     value={transactionRef}
                     onChange={(e) => setTransactionRef(e.target.value)}
-                    placeholder="Transaction Ref"
+                    placeholder={paymentMethod.startsWith('MOBILE_MONEY') ? 'Mobile money transaction reference (optional)' : 'Bank reference (optional)'}
                     className="h-10 lg:h-8 text-sm"
                   />
+                  {paymentMethod === 'MOBILE_MONEY_MTN' && <p className="text-xs text-muted-foreground">MTN MoMo Pay code: {availablePaymentModes.mtn_code}</p>}
+                  {paymentMethod === 'MOBILE_MONEY_AIRTEL' && <p className="text-xs text-muted-foreground">Airtel Pay code: {availablePaymentModes.airtel_merchant}</p>}
+                  {paymentMethod === 'BANK_TRANSFER' && <p className="text-xs text-muted-foreground">Bank account: {availablePaymentModes.centenary_account}</p>}
                 </div>
-              )}
-
-              {/* Bank transfer ref */}
-              {paymentMethod === 'BANK_TRANSFER' && (
-                <Input
-                  value={transactionRef}
-                  onChange={(e) => setTransactionRef(e.target.value)}
-                  placeholder="Bank Reference #"
-                  className="h-10 lg:h-8 text-sm"
-                />
               )}
 
               {/* Payment status — auto-derived; manual override allowed for cash/mm/bt */}
