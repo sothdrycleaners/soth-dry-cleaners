@@ -4,9 +4,15 @@ import { AuthRequest } from '../middleware/auth';
 
 const BRANCH_COLUMNS = `
   id, name, code, phone, email, location, address, is_active, is_default,
-  COALESCE(payment_modes, '{}'::jsonb) AS payment_modes,
+  color, COALESCE(payment_modes, '{}'::jsonb) AS payment_modes,
   created_at, updated_at
 `;
+const DEFAULT_BRANCH_COLOR = '#3B82F6';
+const BRANCH_COLOR_PALETTE = [DEFAULT_BRANCH_COLOR, '#F97316', '#16A34A', '#A855F7', '#E11D48'];
+
+function isValidBranchColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value);
+}
 
 function normalizeCode(name: string, code?: string): string {
   const source = (code && code.trim()) || name;
@@ -142,10 +148,19 @@ export const getBranchPerformance = async (req: AuthRequest, res: Response) => {
 export const createBranch = async (req: AuthRequest, res: Response) => {
   try {
     const { name, code, phone, email, location, address, is_default } = req.body;
+    let color = req.body.color;
 
     const cleanName = String(name || '').trim();
     if (!cleanName) {
       return res.status(400).json({ error: 'Branch name is required' });
+    }
+    if (color === undefined || color === null || color === '') {
+      const savedColors = await query('SELECT color FROM branches WHERE tenant_id = app_current_tenant_id()');
+      const usedColors = new Set(savedColors.rows.map((row: { color: string }) => String(row.color || '').toUpperCase()));
+      color = BRANCH_COLOR_PALETTE.find((candidate) => !usedColors.has(candidate)) || DEFAULT_BRANCH_COLOR;
+    }
+    if (!isValidBranchColor(color)) {
+      return res.status(400).json({ error: 'Branch color must be a six-digit hex color.' });
     }
 
     // Hard cap: max 5 branches
@@ -167,14 +182,21 @@ export const createBranch = async (req: AuthRequest, res: Response) => {
     if (codeTaken.rows.length > 0) {
       return res.status(409).json({ error: `Branch code "${cleanCode}" is already in use.` });
     }
+    const duplicateColor = await query(
+      'SELECT id FROM branches WHERE tenant_id = app_current_tenant_id() AND UPPER(color) = UPPER($1) LIMIT 1',
+      [color]
+    );
+    if (duplicateColor.rows.length > 0) {
+      return res.status(409).json({ error: 'That color is already assigned to another branch. Choose a distinct color.' });
+    }
 
     if (is_default) {
       await query('UPDATE branches SET is_default = FALSE WHERE tenant_id = app_current_tenant_id() AND is_default = TRUE');
     }
 
     const result = await query(
-      `INSERT INTO branches (tenant_id, name, code, phone, email, location, address, is_default)
-       VALUES (app_current_tenant_id(), $1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO branches (tenant_id, name, code, phone, email, location, address, is_default, color)
+       VALUES (app_current_tenant_id(), $1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING ${BRANCH_COLUMNS}`,
       [
         cleanName,
@@ -184,6 +206,7 @@ export const createBranch = async (req: AuthRequest, res: Response) => {
         location || null,
         address || null,
         !!is_default,
+        color.toUpperCase(),
       ]
     );
 
@@ -197,7 +220,7 @@ export const createBranch = async (req: AuthRequest, res: Response) => {
 export const updateBranch = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, code, phone, email, location, address, is_active, is_default, payment_modes } = req.body;
+    const { name, code, phone, email, location, address, is_active, is_default, payment_modes, color } = req.body;
 
     const existing = await query('SELECT id FROM branches WHERE id = $1 AND tenant_id = app_current_tenant_id()', [id]);
     if (existing.rows.length === 0) {
@@ -246,6 +269,21 @@ export const updateBranch = async (req: AuthRequest, res: Response) => {
     if (is_active !== undefined) {
       updates.push(`is_active = $${paramCount++}`);
       values.push(!!is_active);
+    }
+
+    if (color !== undefined) {
+      if (!isValidBranchColor(color)) {
+        return res.status(400).json({ error: 'Branch color must be a six-digit hex color.' });
+      }
+      const duplicateColor = await query(
+        'SELECT id FROM branches WHERE tenant_id = app_current_tenant_id() AND UPPER(color) = UPPER($1) AND id <> $2 LIMIT 1',
+        [color, id]
+      );
+      if (duplicateColor.rows.length > 0) {
+        return res.status(409).json({ error: 'That color is already assigned to another branch. Choose a distinct color.' });
+      }
+      updates.push(`color = $${paramCount++}`);
+      values.push(color.toUpperCase());
     }
 
     if (is_default) {

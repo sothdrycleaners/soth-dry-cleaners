@@ -50,6 +50,7 @@ interface BranchRecord {
   address?: string | null;
   is_active: boolean;
   is_default: boolean;
+  color: string;
   payment_modes?: BranchPaymentModes;
 }
 
@@ -102,6 +103,8 @@ const DEFAULT_BRANCH_PAYMENT_MODES: BranchPaymentModes = {
   mtn_code: '',
   airtel_merchant: '',
 };
+const DEFAULT_BRANCH_COLOR = '#3B82F6';
+const BRANCH_COLOR_PALETTE = [DEFAULT_BRANCH_COLOR, '#F97316', '#16A34A', '#A855F7', '#E11D48'];
 
 export default function Settings() {
   const { token, user, isAdmin, isCashier } = useAuth();
@@ -145,7 +148,7 @@ export default function Settings() {
   const [messageRetentionDays, setMessageRetentionDays] = useState('30');
   const [savedMessageRetentionDays, setSavedMessageRetentionDays] = useState('30');
   const [savingMessageRetention, setSavingMessageRetention] = useState(false);
-  const [newBranch, setNewBranch] = useState({ name: '', location: '', phone: '', email: '' });
+  const [newBranch, setNewBranch] = useState({ name: '', location: '', phone: '', email: '', color: '' });
   const [vatRate, setVatRate] = useState('18.00');
   const [standardKgRate, setStandardKgRate] = useState('10000');
   const [enableEfris, setEnableEfris] = useState(false);
@@ -191,7 +194,7 @@ export default function Settings() {
 
   // Per-branch info editor (name, phone, location, email)
   const [branchEditExpanded, setBranchEditExpanded] = useState<number | null>(null);
-  const [branchEditDraft, setBranchEditDraft] = useState<Record<number, { name: string; phone: string; email: string; location: string; address: string }>>({});
+  const [branchEditDraft, setBranchEditDraft] = useState<Record<number, { name: string; phone: string; email: string; location: string; address: string; color: string }>>({});
   const [savingBranchInfo, setSavingBranchInfo] = useState<number | null>(null);
 
   // Promotions state
@@ -459,6 +462,9 @@ export default function Settings() {
     const axiosError = error as { response?: { data?: { error?: string } } };
     return axiosError.response?.data?.error || fallback;
   };
+  const suggestedBranchColor = BRANCH_COLOR_PALETTE.find(
+    (color) => !branches.some((branch) => branch.color?.toUpperCase() === color)
+  ) || DEFAULT_BRANCH_COLOR;
 
   const createBranch = async () => {
     if (!newBranch.name.trim()) {
@@ -472,11 +478,11 @@ export default function Settings() {
 
     try {
       setSavingBranch(true);
-      await axios.post(`${API_BASE_URL}/branches`, newBranch, {
+      await axios.post(`${API_BASE_URL}/branches`, { ...newBranch, color: newBranch.color || suggestedBranchColor }, {
         headers: { Authorization: `Bearer ${token}` },
       });
       toast({ title: 'Branch added', description: `${newBranch.name} is now available on new orders.` });
-      setNewBranch({ name: '', location: '', phone: '', email: '' });
+      setNewBranch({ name: '', location: '', phone: '', email: '', color: '' });
       fetchBranches();
     } catch (error) {
       toast({
@@ -561,6 +567,7 @@ export default function Settings() {
           email: draft.email.trim() || null,
           location: draft.location.trim() || null,
           address: draft.address.trim() || null,
+          color: draft.color,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -1469,6 +1476,7 @@ Don't miss out! ✨`;
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium">{branch.name}</span>
+                          <span className="h-3 w-3 rounded-full border border-black/10" style={{ backgroundColor: branch.color || DEFAULT_BRANCH_COLOR }} aria-label={`${branch.name} color`} />
                           <span className="text-xs text-muted-foreground font-mono">{branch.code}</span>
                           {branch.is_default && (
                             <span className="text-xs rounded bg-primary/10 text-primary px-2 py-0.5">Main branch</span>
@@ -1499,6 +1507,7 @@ Don't miss out! ✨`;
                                   email: branch.email || '',
                                   location: branch.location || '',
                                   address: branch.address || '',
+                                  color: branch.color || DEFAULT_BRANCH_COLOR,
                                 },
                               }));
                             }
@@ -1574,7 +1583,7 @@ Don't miss out! ✨`;
                               value={branchEditDraft[branch.id]?.name ?? ''}
                               onChange={(e) => setBranchEditDraft(prev => ({
                                 ...prev,
-                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '' }), name: e.target.value },
+                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '', color: DEFAULT_BRANCH_COLOR }), name: e.target.value },
                               }))}
                               placeholder="Branch name"
                               className="mt-1 h-8 text-sm"
@@ -1586,7 +1595,7 @@ Don't miss out! ✨`;
                               value={branchEditDraft[branch.id]?.location ?? ''}
                               onChange={(e) => setBranchEditDraft(prev => ({
                                 ...prev,
-                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '' }), location: e.target.value },
+                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '', color: DEFAULT_BRANCH_COLOR }), location: e.target.value },
                               }))}
                               placeholder="e.g. Ntinda, Kampala"
                               className="mt-1 h-8 text-sm"
@@ -1598,7 +1607,7 @@ Don't miss out! ✨`;
                               value={branchEditDraft[branch.id]?.phone ?? ''}
                               onChange={(e) => setBranchEditDraft(prev => ({
                                 ...prev,
-                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '' }), phone: e.target.value },
+                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '', color: DEFAULT_BRANCH_COLOR }), phone: e.target.value },
                               }))}
                               placeholder="+256 *** *** ***"
                               className="mt-1 h-8 text-sm"
@@ -1611,7 +1620,7 @@ Don't miss out! ✨`;
                               value={branchEditDraft[branch.id]?.email ?? ''}
                               onChange={(e) => setBranchEditDraft(prev => ({
                                 ...prev,
-                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '' }), email: e.target.value },
+                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '', color: DEFAULT_BRANCH_COLOR }), email: e.target.value },
                               }))}
                               placeholder="branch@example.com"
                               className="mt-1 h-8 text-sm"
@@ -1623,11 +1632,25 @@ Don't miss out! ✨`;
                               value={branchEditDraft[branch.id]?.address ?? ''}
                               onChange={(e) => setBranchEditDraft(prev => ({
                                 ...prev,
-                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '' }), address: e.target.value },
+                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '', color: DEFAULT_BRANCH_COLOR }), address: e.target.value },
                               }))}
                               placeholder="Street, building, floor…"
                               className="mt-1 h-8 text-sm"
                             />
+                          </div>
+                          <div className="sm:col-span-2 flex items-center gap-3">
+                            <Label htmlFor={`branch-color-${branch.id}`} className="text-xs">Branch display color</Label>
+                            <Input
+                              id={`branch-color-${branch.id}`}
+                              type="color"
+                              value={branchEditDraft[branch.id]?.color ?? DEFAULT_BRANCH_COLOR}
+                              onChange={(e) => setBranchEditDraft(prev => ({
+                                ...prev,
+                                [branch.id]: { ...(prev[branch.id] || { name: '', phone: '', email: '', location: '', address: '', color: DEFAULT_BRANCH_COLOR }), color: e.target.value },
+                              }))}
+                              className="h-9 w-14 cursor-pointer p-1"
+                            />
+                            <span className="text-xs text-muted-foreground">Used to identify this branch in Orders and order details.</span>
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -1761,6 +1784,17 @@ Don't miss out! ✨`;
                     placeholder="ntinda@example.com"
                     className="mt-2"
                   />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Label htmlFor="new-branch-color">Branch color</Label>
+                  <Input
+                    id="new-branch-color"
+                    type="color"
+                    value={newBranch.color || suggestedBranchColor}
+                    onChange={(e) => setNewBranch({ ...newBranch, color: e.target.value })}
+                    className="h-10 w-14 cursor-pointer p-1"
+                  />
+                  <span className="text-xs text-muted-foreground">Suggested automatically; you can choose another color.</span>
                 </div>
               </div>
               {branches.length >= 5 ? (

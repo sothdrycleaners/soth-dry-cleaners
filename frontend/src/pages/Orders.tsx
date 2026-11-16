@@ -95,6 +95,15 @@ interface Order {
   recorded_at?: string;
 }
 
+const DEFAULT_BRANCH_DISPLAY_COLOR = '#3B82F6';
+function branchDisplayColor(order: Pick<Order, 'branch_id' | 'branch_name'>, branches: Array<{ id: number; name: string; color?: string }>): string {
+  const branch = branches.find((item) => order.branch_id && Number(item.id) === Number(order.branch_id))
+    || branches.find((item) => item.name.trim().toLowerCase() === String(order.branch_name || '').trim().toLowerCase());
+  return branch?.color && /^#[0-9A-Fa-f]{6}$/.test(branch.color)
+    ? branch.color
+    : DEFAULT_BRANCH_DISPLAY_COLOR;
+}
+
 interface OrderItem {
   id: number;
   price_item_id: number;
@@ -691,7 +700,7 @@ export default function Orders() {
   /** Full branch records — include payment_modes for per-branch WhatsApp receipts */
   const [branchList, setBranchList] = useState<Array<{
     id: number; name: string; phone?: string; email?: string;
-    location?: string; address?: string;
+    location?: string; address?: string; color?: string;
     payment_modes?: { centenary_account?: string; mtn_code?: string; airtel_merchant?: string };
   }>>([]);
   const [additionalPayment, setAdditionalPayment] = useState(0);
@@ -2019,6 +2028,7 @@ export default function Orders() {
               filteredOrders.map((order) => {
                 const overdueStyle = getOverdueStyle(order);
                 const isHighlighted = highlightedOrderNumber === order.order_number;
+                const orderBranchColor = branchDisplayColor(order, branchList);
                 return (
                 <TableRow
                   key={order.id}
@@ -2081,7 +2091,7 @@ export default function Orders() {
                   {multiBranch && visibleColumns.branch && (
                     <TableCell className="max-w-[120px] px-2 py-2 lg:max-w-0">
                       {order.branch_name ? (
-                        <span title={order.branch_name} className="inline-block max-w-full truncate rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-0.5 text-[10px] font-medium">
+                        <span title={order.branch_name} className="inline-block max-w-full truncate rounded-full border px-2 py-0.5 text-[10px] font-medium" style={{ color: orderBranchColor, borderColor: `${orderBranchColor}66`, backgroundColor: `${orderBranchColor}1A` }}>
                           {order.branch_name}
                         </span>
                       ) : (
@@ -2353,7 +2363,7 @@ export default function Orders() {
                   {selectedOrder.branch_name && (
                     <div>
                       <p className="text-sm text-muted-foreground">Branch</p>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2.5 py-1 text-sm font-medium">
+                      <span className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm font-medium" style={{ color: branchDisplayColor(selectedOrder, branchList), borderColor: `${branchDisplayColor(selectedOrder, branchList)}66`, backgroundColor: `${branchDisplayColor(selectedOrder, branchList)}1A` }}>
                         {selectedOrder.branch_name}
                       </span>
                     </div>
