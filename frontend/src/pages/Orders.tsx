@@ -56,6 +56,7 @@ import {
   COLLECTION_GRACE_DAYS,
   UNCOLLECTED_DONATION_MONTHS,
   DEFAULT_PAYMENT_MODES,
+  resolvePaymentModes,
   type PaymentModeDetails,
   type BusinessInfo,
   type OrderWhatsAppPayload,
@@ -1014,15 +1015,14 @@ export default function Orders() {
     const effectiveBusiness = resolveBusinessInfoForOrder(order);
     const effectivePhone = effectiveBusiness?.phone || businessPhone || undefined;
 
-    // Resolve payment modes: use branch-specific modes if set, else fall back to global
-    const orderBranch = order.branch_id
-      ? branchList.find((b) => b.id === order.branch_id)
-      : null;
-    const branchModes = orderBranch?.payment_modes;
-    const hasBranchPaymentModes = Object.values(branchModes || {}).some((value) => String(value || '').trim());
-    const effectivePaymentModes: PaymentModeDetails = hasBranchPaymentModes
-      ? { ...paymentModes, ...branchModes }
-      : paymentModes;
+    // Prefer the exact branch record (falling back to its name for legacy orders).
+    const orderBranch = branchList.find((branch) => Number(branch.id) === Number(order.branch_id))
+      || branchList.find((branch) => branch.name.trim().toLowerCase() === String(order.branch_name || '').trim().toLowerCase());
+    const effectivePaymentModes = resolvePaymentModes(
+      orderBranch?.payment_modes,
+      paymentModes,
+      Boolean(orderBranch?.is_default)
+    );
 
     switch (kind) {
       case 'receipt':

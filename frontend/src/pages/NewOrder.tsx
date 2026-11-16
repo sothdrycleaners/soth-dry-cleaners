@@ -59,6 +59,7 @@ import {
   buildOrderConfirmationWhatsAppMessage,
   openWhatsAppMessenger,
   DEFAULT_PAYMENT_MODES,
+  resolvePaymentModes,
   type PaymentModeDetails,
   type BusinessInfo,
 } from '@/lib/whatsapp';
@@ -1251,7 +1252,8 @@ export default function NewOrder() {
 
       const customerSnapshot = selectedCustomer;
       const itemsSnapshot = [...orderItems];
-      const selectedBranch=branches.find((branch)=>String(branch.id)===String(selectedBranchId));
+      const actualBranchId = order?.branch_id ?? selectedBranchId;
+      const selectedBranch = branches.find((branch) => String(branch.id) === String(actualBranchId));
       const branchBusinessInfo: BusinessInfo={
         ...(businessInfo||{}),
         branch_name:branches.length>1?order.branch_name||selectedBranch?.name:undefined,
@@ -1260,11 +1262,11 @@ export default function NewOrder() {
         location:selectedBranch?.location||businessInfo?.location||'',
         address:selectedBranch?.address||businessInfo?.address||'',
       };
-      const hasBranchPaymentModes = Object.values(selectedBranch?.payment_modes || {})
-        .some((value) => String(value || '').trim());
-      const branchPaymentModes: PaymentModeDetails = hasBranchPaymentModes
-        ? { ...paymentModes, ...selectedBranch?.payment_modes }
-        : paymentModes;
+      const branchPaymentModes = resolvePaymentModes(
+        selectedBranch?.payment_modes,
+        paymentModes,
+        Boolean(selectedBranch?.is_default)
+      );
 
       toast({
         title: 'Order Created Successfully',

@@ -179,9 +179,9 @@ export default function Settings() {
   const [savingBargainLimits, setSavingBargainLimits] = useState(false);
 
   // Payment accounts for on-account / partial WhatsApp receipts
-  const [centenaryAccount, setCentenaryAccount] = useState('3205564146');
-  const [mtnCode, setMtnCode] = useState('30353491');
-  const [airtelMerchant, setAirtelMerchant] = useState('4403961');
+  const [centenaryAccount, setCentenaryAccount] = useState('');
+  const [mtnCode, setMtnCode] = useState('');
+  const [airtelMerchant, setAirtelMerchant] = useState('');
   const [savingPaymentAccounts, setSavingPaymentAccounts] = useState(false);
 
   // Per-branch payment modes editor
@@ -447,9 +447,9 @@ export default function Settings() {
           headers: { Authorization: `Bearer ${token}` },
         })
         .then((res) => {
-          setCentenaryAccount(res.data.centenary_account || '3205564146');
-          setMtnCode(res.data.mtn_code || '30353491');
-          setAirtelMerchant(res.data.airtel_merchant || '4403961');
+          setCentenaryAccount(res.data.centenary_account || '');
+          setMtnCode(res.data.mtn_code || '');
+          setAirtelMerchant(res.data.airtel_merchant || '');
         })
         .catch(() => undefined);
     }

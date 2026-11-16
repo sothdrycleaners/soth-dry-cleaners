@@ -66,10 +66,30 @@ export type PaymentModeDetails = {
 };
 
 export const DEFAULT_PAYMENT_MODES: Required<PaymentModeDetails> = {
-  centenary_account: '3205564146',
-  mtn_code: '30353491',
-  airtel_merchant: '4403961',
+  centenary_account: '',
+  mtn_code: '',
+  airtel_merchant: '',
 };
+
+/** Prefer explicitly saved branch details, then explicitly saved business details. */
+export function resolvePaymentModes(
+  branchModes?: PaymentModeDetails | null,
+  businessModes?: PaymentModeDetails | null,
+  useBusinessModes = false
+): PaymentModeDetails {
+  const branch = {
+    centenary_account: String(branchModes?.centenary_account || '').trim(),
+    mtn_code: String(branchModes?.mtn_code || '').trim(),
+    airtel_merchant: String(branchModes?.airtel_merchant || '').trim(),
+  };
+  if (Object.values(branch).some(Boolean)) return branch;
+  if (!useBusinessModes) return { ...DEFAULT_PAYMENT_MODES };
+  return {
+    centenary_account: String(businessModes?.centenary_account || '').trim(),
+    mtn_code: String(businessModes?.mtn_code || '').trim(),
+    airtel_merchant: String(businessModes?.airtel_merchant || '').trim(),
+  };
+}
 
 /** Business identity from Settings → Business Information */
 export type BusinessInfo = {
@@ -127,29 +147,6 @@ function shouldIncludePaymentModes(order: OrderWhatsAppPayload): boolean {
   );
 }
 
-function paymentMethodLabel(method?: string): string {
-  if (!method) return '';
-  if (method.toUpperCase() === 'ON_ACCOUNT') return 'On Account';
-  return method.replace(/_/g, ' ');
-}
-
-function orderStatusLabel(order: OrderWhatsAppPayload): string {
-  switch (normalizedOrderStatus(order)) {
-    case 'pending':
-      return 'Received';
-    case 'processing':
-      return 'In progress';
-    case 'ready':
-      return 'Ready for pickup';
-    case 'delivered':
-      return 'Delivered';
-    case 'cancelled':
-      return 'Cancelled';
-    default:
-      return '';
-  }
-}
-
 /**
  * Resolves which message to produce. A caller may ask for a 'receipt' on an
  * order that is already ready or delivered — the order status wins so we never
@@ -190,92 +187,24 @@ function headerFor(kind: OrderMessageKind): string {
 
 function buildItemLines(items: OrderWhatsAppItem[]): string[] {
   if (!items.length) return [];
-
-  const lines = ['*ITEMS:*'];
-  items.forEach((item, index) => {
-    const discount = Number(item.discount_amount || 0);
-    const surcharge = Number(item.surcharge_amount || 0);
-    const hasAdjustment = discount > 0 || surcharge > 0;
-    const baseAmount = Number(item.total_price || 0) + discount - surcharge;
-    // Service type (wash / iron / express) is an internal workflow detail —
-    // customers only see the item name and the price charged.
-    lines.push(`${index + 1}. ${item.item_name} x${item.quantity} — ${formatUGX(baseAmount)}`);
-    if (hasAdjustment) {
-      if (surcharge > 0) lines.push(`   Special handling: +${formatUGX(surcharge)}`);
-      if (discount > 0) lines.push(`   Discount applied: -${formatUGX(discount)}`);
-      lines.push(`   Item total: ${formatUGX(item.total_price)}`);
-    }
-  });
-  lines.push('');
-  return lines;
+  return [
+    '*ITEMS:*',
+    ...items.map((item) => `- ${item.item_name} x${item.quantity} - ${formatUGX(item.total_price)}`),
+    '',
+  ];
 }
 
-function buildPaymentSummaryLines(
-  order: OrderWhatsAppPayload,
-  items: OrderWhatsAppItem[] = []
-): string[] {
-  const lines = ['*PAYMENT SUMMARY*'];
-
-  // Per-item discounts are already netted off each line total, so add them
-  // back for a clear gross → discount → net story on the receipt.
-  const itemDiscountTotal = items.reduce(
-    (sum, item) => sum + Number(item.discount_amount || 0),
-    0
-  );
-  const itemSurchargeTotal = items.reduce(
-    (sum, item) => sum + Number(item.surcharge_amount || 0),
-    0
-  );
-  const orderDiscount = Number(order.discount_amount || 0);
-  const bargainDiscount = Number(order.bargain_amount || 0);
-  const grossSubtotal = Number(order.subtotal || 0) + itemDiscountTotal;
-
-  lines.push(`Subtotal: ${formatUGX(grossSubtotal)}`);
-
-  if (itemDiscountTotal > 0) {
-    lines.push(`Item discounts: -${formatUGX(itemDiscountTotal)}`);
+function buildPaymentSummaryLines(order: OrderWhatsAppPayload): string[] {
+  const lines = [
+    '*PAYMENT SUMMARY*',
+    `Total: *${formatUGX(order.total_amount)}*`,
+    `Paid: ${formatUGX(order.amount_paid)}`,
+  ];
+  if (Number(order.balance || 0) > 0) lines.push(`Balance due: *${formatUGX(order.balance)}*`);
+  else lines.push('Payment complete.');
+  if (String(order.payment_method || '').toUpperCase() === 'ON_ACCOUNT') {
+    lines.push('Payment method: On Account');
   }
-  if (Number(order.discount_percentage || 0) > 0 && orderDiscount > 0) {
-    lines.push(`Order discount (${order.discount_percentage}%): -${formatUGX(orderDiscount)}`);
-  } else if (orderDiscount > 0) {
-    lines.push(`Order discount: -${formatUGX(orderDiscount)}`);
-  }
-  if (bargainDiscount > 0) {
-    lines.push(`Bargain discount: -${formatUGX(bargainDiscount)}`);
-  }
-
-  if (itemSurchargeTotal > 0) {
-    lines.push(`Item special handling: +${formatUGX(itemSurchargeTotal)}`);
-  }
-
-  const totalDiscount = itemDiscountTotal + orderDiscount + bargainDiscount;
-  if (totalDiscount > 0) {
-    lines.push(`*You saved: ${formatUGX(totalDiscount)}*`);
-  }
-
-  const orderSurcharge = Number(order.surcharge_amount || 0);
-  if (orderSurcharge > 0) {
-    lines.push(`Additional service: +${formatUGX(orderSurcharge)}`);
-  }
-
-  if (Number(order.tax_amount || 0) > 0) {
-    lines.push(`VAT (${order.tax_rate || 18}%): +${formatUGX(order.tax_amount || 0)}`);
-  }
-
-  lines.push(`*TOTAL: ${formatUGX(order.total_amount)}*`);
-  lines.push(`Amount Paid: ${formatUGX(order.amount_paid)}`);
-
-  if (Number(order.balance || 0) > 0) {
-    lines.push(`*Balance Due: ${formatUGX(order.balance)}*`);
-  } else {
-    lines.push('Payment confirmed: Full payment received for this order.');
-  }
-
-  const method = paymentMethodLabel(order.payment_method);
-  if (method) {
-    lines.push(`Method: ${method}`);
-  }
-
   return lines;
 }
 
@@ -285,7 +214,12 @@ function buildPaymentRequestLines(
 ): string[] {
   if (!shouldIncludePaymentModes(order)) return [];
 
-  const modes = { ...DEFAULT_PAYMENT_MODES, ...(paymentModes || {}) };
+  const modes = {
+    centenary_account: String(paymentModes?.centenary_account || '').trim(),
+    mtn_code: String(paymentModes?.mtn_code || '').trim(),
+    airtel_merchant: String(paymentModes?.airtel_merchant || '').trim(),
+  };
+  if (!Object.values(modes).some(Boolean)) return [];
   const lines = ['', '*HOW TO PAY*'];
 
   if (modes.centenary_account) lines.push(`Bank account number: ${modes.centenary_account}`);
@@ -344,12 +278,18 @@ function buildCompactPaymentLines(
     lines.push(`*Balance due: ${formatUGX(order.balance)}*`);
 
     // Show how-to-pay details so the customer can act on it immediately
-    const modes = { ...DEFAULT_PAYMENT_MODES, ...(paymentModes || {}) };
-    lines.push('');
-    lines.push('*HOW TO PAY*');
-    if (modes.centenary_account) lines.push(`Bank account number: ${modes.centenary_account}`);
-    if (modes.mtn_code)         lines.push(`MTN MoMo Pay: ${modes.mtn_code}`);
-    if (modes.airtel_merchant)  lines.push(`Airtel Pay: ${modes.airtel_merchant}`);
+    const modes = {
+      centenary_account: String(paymentModes?.centenary_account || '').trim(),
+      mtn_code: String(paymentModes?.mtn_code || '').trim(),
+      airtel_merchant: String(paymentModes?.airtel_merchant || '').trim(),
+    };
+    if (Object.values(modes).some(Boolean)) {
+      lines.push('');
+      lines.push('*HOW TO PAY*');
+      if (modes.centenary_account) lines.push(`Bank account number: ${modes.centenary_account}`);
+      if (modes.mtn_code) lines.push(`MTN MoMo Pay: ${modes.mtn_code}`);
+      if (modes.airtel_merchant) lines.push(`Airtel Pay: ${modes.airtel_merchant}`);
+    }
     lines.push('Kindly clear the balance before collection.');
   } else {
     lines.push('Payment confirmed: *Full payment received* ✓');
@@ -393,8 +333,6 @@ export function buildOrderWhatsAppMessage(
     `Date: ${formatShortDate(order.created_at)}`,
   ];
 
-  const statusLabel = orderStatusLabel(order);
-  if (statusLabel) lines.push(`Status: ${statusLabel}`);
   if (branchName) lines.push(`Branch: ${branchName}`);
   if (Number(order.catalogue_kg) > 0) {
     lines.push(`Bulk laundry: ${Number(order.catalogue_kg).toFixed(2)} kg at ${formatUGX(Number(order.catalogue_kg_rate) || 0)}/kg`);
@@ -404,7 +342,7 @@ export function buildOrderWhatsAppMessage(
   if (showItemDetail) {
     // Full receipt — item list then detailed payment breakdown
     lines.push(...buildItemLines(items));
-    lines.push(...buildPaymentSummaryLines(order, items));
+    lines.push(...buildPaymentSummaryLines(order));
     lines.push(...buildPaymentRequestLines(order, options.paymentModes));
   } else {
     // Compact notification — no item list, just money figures + payment modes
@@ -415,10 +353,6 @@ export function buildOrderWhatsAppMessage(
 
   switch (kind) {
     case 'confirmation':
-      lines.push('We have received your items and our team is now working on them.');
-      lines.push('We will notify you as soon as your order is ready for collection.');
-      lines.push('');
-      lines.push('Please contact us if you have any questions.');
       break;
 
     case 'invoice':
@@ -442,20 +376,18 @@ export function buildOrderWhatsAppMessage(
       lines.push('We hope everything met your expectations.');
       break;
 
-    default: // receipt / processing
+    case 'receipt':
       lines.push("We'll notify you as soon as your order is ready for pickup.");
       break;
   }
 
-  lines.push('');
-  if (paid) {
-    lines.push('Thank you for your payment!');
-  } else {
-    lines.push('Kindly settle the outstanding balance at your earliest convenience.');
+  if (kind === 'confirmation') {
+    lines.push('', 'We have received your items. We will notify you when they are ready.');
   }
-  lines.push('Thank you for choosing Soth Dry Cleaners!');
-
-  lines.push(...buildBusinessFooterLines({ ...business, branch_name: branchName }));
+  lines.push('', 'Thank you for choosing Soth Dry Cleaners!');
+  if (kind !== 'confirmation' && kind !== 'receipt') {
+    lines.push(...buildBusinessFooterLines({ ...business, branch_name: undefined }));
+  }
 
   return lines.join('\n');
 }

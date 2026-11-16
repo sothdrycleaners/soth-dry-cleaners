@@ -580,29 +580,27 @@ function parsePercent(value: unknown, fallback: number): number | null {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
 }
 
-const DEFAULT_PAYMENT_ACCOUNTS = {
-  centenary_account: '3205564146',
-  mtn_code: '30353491',
-  airtel_merchant: '4403961',
+const EMPTY_PAYMENT_ACCOUNTS = {
+  centenary_account: '',
+  mtn_code: '',
+  airtel_merchant: '',
 };
-
-const getTenantPaymentAccountDefaults = (tenantId: number) =>
-  tenantId === 1
-    ? DEFAULT_PAYMENT_ACCOUNTS
-    : { centenary_account: '', mtn_code: '', airtel_merchant: '' };
 
 /** Pay-in details for on-account / unpaid / partial WhatsApp receipts */
 export const getPaymentAccounts = async (req: AuthRequest, res: Response) => {
   try {
-    const defaults = getTenantPaymentAccountDefaults(req.tenant?.id || 1);
     const result = await query(
       `SELECT setting_value FROM business_settings WHERE setting_key = 'payment_accounts' AND tenant_id = app_current_tenant_id()`
     );
     if (result.rows.length === 0) {
-      return res.json(defaults);
+      return res.json(EMPTY_PAYMENT_ACCOUNTS);
     }
     const stored = result.rows[0].setting_value || {};
-    res.json({ ...defaults, ...stored });
+    res.json({
+      centenary_account: String(stored.centenary_account || '').trim(),
+      mtn_code: String(stored.mtn_code || '').trim(),
+      airtel_merchant: String(stored.airtel_merchant || '').trim(),
+    });
   } catch (error) {
     console.error('Get payment accounts error:', error);
     res.status(500).json({ error: 'Failed to fetch payment accounts' });
@@ -615,11 +613,10 @@ export const updatePaymentAccounts = async (req: AuthRequest, res: Response) => 
       return res.status(403).json({ error: 'Only administrators can update payment accounts' });
     }
 
-    const defaults = getTenantPaymentAccountDefaults(req.tenant?.id || 1);
     const {
-      centenary_account = defaults.centenary_account,
-      mtn_code = defaults.mtn_code,
-      airtel_merchant = defaults.airtel_merchant,
+      centenary_account = '',
+      mtn_code = '',
+      airtel_merchant = '',
     } = req.body;
 
     const value = {
