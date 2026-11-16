@@ -54,6 +54,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   buildOrderConfirmationWhatsAppMessage,
   openWhatsAppMessenger,
@@ -279,7 +280,10 @@ export default function NewOrder() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerPopover, setShowCustomerPopover] = useState(false);
   const [showAddCustomerDialog, setShowAddCustomerDialog] = useState(false);
+  const [sameQuickNameConfirmOpen, setSameQuickNameConfirmOpen] = useState(false);
+  const [sameQuickNameConfirmValue, setSameQuickNameConfirmValue] = useState('');
   const [addingCustomer, setAddingCustomer] = useState(false);
+  const [similarQuickAddNames, setSimilarQuickAddNames] = useState<Array<Pick<Customer, 'name' | 'customer_id'>>>([]);
 
   // Price items state
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
@@ -333,6 +337,25 @@ export default function NewOrder() {
     sms_opt_in: true,
     customer_type: 'INDIVIDUAL' as 'INDIVIDUAL' | 'BUSINESS',
   });
+
+  useEffect(() => {
+    const name = newCustomerForm.name.trim();
+    if (!showAddCustomerDialog || name.length < 2 || !token) {
+      setSimilarQuickAddNames([]);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
+          headers: { Authorization: `Bearer ${token}` }, params: { name },
+        });
+        setSimilarQuickAddNames(response.data?.duplicates?.similarNames || []);
+      } catch {
+        setSimilarQuickAddNames([]);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [newCustomerForm.name, showAddCustomerDialog, token]);
 
   // Fetch customers
   const fetchCustomers = useCallback(async () => {
@@ -1007,8 +1030,9 @@ export default function NewOrder() {
   };
 
   // Handle quick add customer
-  const handleQuickAddCustomer = async () => {
-    if (!newCustomerForm.name || !newCustomerForm.phone) {
+  const handleQuickAddCustomer = async (confirmedName?: string) => {
+    const customerName = (confirmedName ?? newCustomerForm.name).trim();
+    if (!customerName || !newCustomerForm.phone) {
       toast({
         variant: 'destructive',
         title: 'Validation Error',
@@ -1021,11 +1045,29 @@ export default function NewOrder() {
       return;
     }
 
+    if (confirmedName === undefined) {
+      try {
+        const nameCheck = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
+          headers: { Authorization: `Bearer ${token}` }, params: { name: customerName },
+        });
+        const matches = nameCheck.data?.duplicates?.similarNames || [];
+        setSimilarQuickAddNames(matches);
+        const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+        if (matches.some((customer: Customer) => normalizeName(customer.name) === normalizeName(customerName))) {
+          setSameQuickNameConfirmValue(customerName);
+          setSameQuickNameConfirmOpen(true);
+          return;
+        }
+      } catch {
+        // The API will still enforce phone uniqueness if the advisory name check is unavailable.
+      }
+    }
+
     try {
       setAddingCustomer(true);
       const response = await axios.post(
         `${API_BASE_URL}/customers`,
-        newCustomerForm,
+        { ...newCustomerForm, name: customerName },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -1033,6 +1075,7 @@ export default function NewOrder() {
       await fetchCustomers(); // Refresh customer list
       setSelectedCustomer(newCustomer);
       setShowAddCustomerDialog(false);
+      setSameQuickNameConfirmOpen(false);
       setNewCustomerForm({
         name: '',
         phone: '',
@@ -2478,6 +2521,14 @@ export default function NewOrder() {
                   onChange={(e) => setNewCustomerForm({ ...newCustomerForm, name: e.target.value })}
                   placeholder="Customer name"
                 />
+                {similarQuickAddNames.length > 0 && (
+                  <Alert className="py-2">
+                    <AlertDescription className="text-xs">
+                      Possible match: {similarQuickAddNames.map((customer) => `${customer.name} (${customer.customer_id})`).join(', ')}.
+                      {' '}Names may repeat; consider adding a surname, initial, or location. You can still save.
+                    </AlertDescription>
+                  </Alert>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new-phone">Phone *</Label>
@@ -2547,6 +2598,28 @@ export default function NewOrder() {
                 <UserPlus className="mr-2 h-4 w-4" />
               )}
               {addingCustomer ? 'Adding...' : 'Add Customer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={sameQuickNameConfirmOpen} onOpenChange={setSameQuickNameConfirmOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Customer with this name already exists</DialogTitle>
+            <DialogDescription>
+              {similarQuickAddNames.filter((customer) => customer.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase() === sameQuickNameConfirmValue.trim().replace(/\s+/g, ' ').toLocaleLowerCase()).map((customer) => `${customer.name} (${customer.customer_id})`).join(', ')}
+              {' '}has the same name. Add a surname or another distinction, or confirm the name as entered. A different phone number is still required.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="confirm-quick-customer-name">Customer name</Label>
+            <Input id="confirm-quick-customer-name" value={sameQuickNameConfirmValue} onChange={(event) => setSameQuickNameConfirmValue(event.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSameQuickNameConfirmOpen(false)}>Go back</Button>
+            <Button onClick={() => handleQuickAddCustomer(sameQuickNameConfirmValue)} disabled={addingCustomer || !sameQuickNameConfirmValue.trim()}>
+              Confirm and add customer
             </Button>
           </DialogFooter>
         </DialogContent>

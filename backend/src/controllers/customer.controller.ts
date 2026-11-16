@@ -26,25 +26,49 @@ async function findCustomerByPhone(phone: string, excludeId?: number) {
   return result.rows[0] ?? null;
 }
 
-async function findCustomerByName(name: string, excludeId?: number) {
-  const normalizedName = normalizeCustomerName(name);
-  if (!normalizedName) return null;
+function nameSimilarity(left: string, right: string): number {
+  const a = normalizeCustomerName(left);
+  const b = normalizeCustomerName(right);
+  if (!a || !b) return 0;
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const above = previous[j];
+      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
+}
 
-  const values: Array<string | number> = [normalizedName];
+async function findSimilarCustomers(name: string, excludeId?: number) {
+  const normalizedName = normalizeCustomerName(name);
+  const firstName = normalizedName.split(' ')[0];
+  if (!firstName) return [];
+  const values: Array<string | number> = [firstName.slice(0, 2)];
   let sql = `
     SELECT id, name, customer_id, phone
     FROM customers
     WHERE tenant_id = app_current_tenant_id()
-      AND LOWER(TRIM(regexp_replace(name, '\\s+', ' ', 'g'))) = $1
+      AND LEFT(LOWER(TRIM(regexp_replace(name, '\\s+', ' ', 'g'))), 2) = $1
   `;
-
   if (excludeId !== undefined) {
     sql += ' AND id != $2';
     values.push(excludeId);
   }
-
+  sql += ' ORDER BY name LIMIT 100';
   const result = await query(sql, values);
-  return result.rows[0] ?? null;
+  return result.rows
+    .map((customer: any) => {
+      const existingFirstName = normalizeCustomerName(customer.name).split(' ')[0];
+      return { customer, score: Math.max(nameSimilarity(name, customer.name), nameSimilarity(firstName, existingFirstName)) };
+    })
+    .filter(({ score }: any) => score >= 0.72)
+    .sort((a: any, b: any) => b.score - a.score)
+    .slice(0, 5)
+    .map(({ customer }: any) => customer);
 }
 
 export const getAllCustomers = async (req: AuthRequest, res: Response) => {
@@ -274,13 +298,15 @@ export const createCustomer = async (req: AuthRequest, res: Response) => {
     // Handle UNIQUE constraint violations professionally
     if (error.code === '23505') { // PostgreSQL unique_violation error code
       // Check which constraint was violated
-      if (error.constraint === 'unique_customer_phone') {
+      if (['unique_customer_phone', 'customers_tenant_normalized_phone_key'].includes(error.constraint)) {
         // Get existing customer details to show helpful message
         const { phone } = req.body;
         try {
           const existing = await query(
-            'SELECT id, customer_id, name, phone FROM customers WHERE phone = $1 AND tenant_id = app_current_tenant_id()',
-            [phone]
+            `SELECT id, customer_id, name, phone FROM customers
+             WHERE tenant_id = app_current_tenant_id()
+               AND regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = $1`,
+            [normalizePhone(phone)]
           );
           if (existing.rows.length > 0) {
             const customer = existing.rows[0];
@@ -463,11 +489,13 @@ export const updateCustomer = async (req: AuthRequest, res: Response) => {
       const { id } = req.params;
       const { phone, email } = req.body;
       
-      if (error.constraint === 'unique_customer_phone') {
+      if (['unique_customer_phone', 'customers_tenant_normalized_phone_key'].includes(error.constraint)) {
         try {
           const existing = await query(
-            'SELECT id, customer_id, name, phone FROM customers WHERE phone = $1 AND id != $2 AND tenant_id = app_current_tenant_id()',
-            [phone, id]
+            `SELECT id, customer_id, name, phone FROM customers
+             WHERE tenant_id = app_current_tenant_id() AND id != $2
+               AND regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = $1`,
+            [normalizePhone(phone), id]
           );
           if (existing.rows.length > 0) {
             const customer = existing.rows[0];
@@ -674,7 +702,7 @@ export const checkDuplicateCustomer = async (req: AuthRequest, res: Response) =>
     // Check email (CRITICAL - must be unique)
     if (email && typeof email === 'string' && email.trim() !== '') {
       const values: Array<string | number> = [email.trim()];
-      let emailSql = 'SELECT id, customer_id, name, phone, email FROM customers WHERE email = $1';
+      let emailSql = 'SELECT id, customer_id, name, phone, email FROM customers WHERE tenant_id = app_current_tenant_id() AND email = $1';
       if (Number.isFinite(excludeId)) {
         emailSql += ' AND id != $2';
         values.push(excludeId as number);
@@ -687,13 +715,10 @@ export const checkDuplicateCustomer = async (req: AuthRequest, res: Response) =>
     
     // Names may repeat; only phone/email block creation
     if (name && typeof name === 'string' && name.trim() !== '') {
-      const existingName = await findCustomerByName(
+      duplicates.similarNames = await findSimilarCustomers(
         name,
         Number.isFinite(excludeId) ? excludeId : undefined
       );
-      if (existingName) {
-        duplicates.similarNames = [existingName]; // informational only
-      }
     }
     
     const hasDuplicates = duplicates.phone !== null || 

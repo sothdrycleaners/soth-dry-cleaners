@@ -132,6 +132,8 @@ export default function Customers() {
   
   // Dialog states
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [sameNameConfirmOpen, setSameNameConfirmOpen] = useState(false);
+  const [sameNameConfirmValue, setSameNameConfirmValue] = useState('');
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -158,8 +160,10 @@ export default function Customers() {
     customer_type: "INDIVIDUAL" as 'INDIVIDUAL' | 'BUSINESS',
   });
   const [phoneHint, setPhoneHint] = useState<PhoneHint>({ kind: 'idle' });
+  const [similarNameMatches, setSimilarNameMatches] = useState<Array<Pick<Customer, 'id' | 'name' | 'customer_id'>>>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const phoneCheckRef = useRef(0);
+  const nameCheckRef = useRef(0);
 
   // Handle search from navigation state
   useEffect(() => {
@@ -293,6 +297,30 @@ export default function Customers() {
     token,
   ]);
 
+  // Similar names are advisory only. Staff may still save the customer and
+  // can distinguish people with a surname, initial, or location.
+  useEffect(() => {
+    if ((!isAddDialogOpen && !isEditDialogOpen) || formData.name.trim().length < 2 || !token) {
+      setSimilarNameMatches([]);
+      return;
+    }
+    const checkId = ++nameCheckRef.current;
+    const timer = window.setTimeout(async () => {
+      try {
+        const params: Record<string, string | number> = { name: formData.name.trim() };
+        if (isEditDialogOpen && selectedCustomer?.id) params.exclude_id = selectedCustomer.id;
+        const response = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
+          headers: { Authorization: `Bearer ${token}` }, params,
+        });
+        if (checkId !== nameCheckRef.current) return;
+        setSimilarNameMatches(response.data?.duplicates?.similarNames || []);
+      } catch {
+        if (checkId === nameCheckRef.current) setSimilarNameMatches([]);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [formData.name, isAddDialogOpen, isEditDialogOpen, selectedCustomer?.id, token]);
+
   const fetchStats = useCallback(async () => {
     try {
       if (!token) return;
@@ -354,7 +382,7 @@ export default function Customers() {
     fetchCustomers();
   };
 
-  const handleAddCustomer = async () => {
+  const handleAddCustomer = async (confirmedName?: string) => {
     // Guard against double-clicks creating the customer twice: the second
     // request would hit the duplicate-phone check and show a false error.
     if (isSubmitting) return;
@@ -362,9 +390,26 @@ export default function Customers() {
     try {
       const token = localStorage.getItem("soth_token");
       
-      if (!formData.name?.trim()) {
+      const customerName = (confirmedName ?? formData.name).trim();
+      if (!customerName) {
         toast.error("Customer name is required");
         return;
+      }
+
+      if (confirmedName === undefined) {
+        const nameCheck = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { name: customerName },
+        });
+        const matches = nameCheck.data?.duplicates?.similarNames || [];
+        setSimilarNameMatches(matches);
+        const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+        const exactNameMatches = matches.filter((customer: Customer) => normalizeName(customer.name) === normalizeName(customerName));
+        if (exactNameMatches.length > 0) {
+          setSameNameConfirmValue(customerName);
+          setSameNameConfirmOpen(true);
+          return;
+        }
       }
 
       const phoneResult = formatCustomerPhone(formData.phone);
@@ -381,12 +426,13 @@ export default function Customers() {
       setIsSubmitting(true);
       await axios.post(
         `${API_BASE_URL}/customers`,
-        { ...formData, name: formData.name.trim(), phone: phoneResult.e164 },
+        { ...formData, name: customerName, phone: phoneResult.e164 },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
       toast.success("Customer added successfully");
       setIsAddDialogOpen(false);
+      setSameNameConfirmOpen(false);
       resetForm();
       fetchCustomers();
       fetchStats(); // Refresh statistics
@@ -919,6 +965,16 @@ export default function Customers() {
                   placeholder="Enter customer name"
                   maxLength={CUSTOMER_LIMITS.name}
                 />
+                {similarNameMatches.length > 0 && (
+                  <Alert className="py-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription className="text-sm">
+                      Possible existing customer{similarNameMatches.length > 1 ? 's' : ''}:{' '}
+                      {similarNameMatches.map((customer) => `${customer.name} (${customer.customer_id})`).join(', ')}.
+                      {' '}Names may repeat. Consider adding a surname, initial, or location; you can still save this customer.
+                    </AlertDescription>
+                  </Alert>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone *</Label>
@@ -1030,6 +1086,28 @@ export default function Customers() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={sameNameConfirmOpen} onOpenChange={setSameNameConfirmOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Customer with this name already exists</DialogTitle>
+            <DialogDescription>
+              {similarNameMatches.filter((customer) => customer.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase() === sameNameConfirmValue.trim().replace(/\s+/g, ' ').toLocaleLowerCase()).map((customer) => `${customer.name} (${customer.customer_id})`).join(', ')}
+              {' '}has the same name. You can add a surname or another distinction, or confirm this name as entered. A different phone number is still required.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="confirm-customer-name">Customer name</Label>
+            <Input id="confirm-customer-name" value={sameNameConfirmValue} onChange={(event) => setSameNameConfirmValue(event.target.value)} maxLength={CUSTOMER_LIMITS.name} />
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setSameNameConfirmOpen(false)}>Go back</Button>
+            <Button onClick={() => handleAddCustomer(sameNameConfirmValue)} disabled={isSubmitting || !sameNameConfirmValue.trim()}>
+              Confirm and add customer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Customer Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[96dvh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
@@ -1049,6 +1127,16 @@ export default function Customers() {
                   onChange={(e) => setFormData({ ...formData, name: e.target.value.slice(0, CUSTOMER_LIMITS.name) })}
                   maxLength={CUSTOMER_LIMITS.name}
                 />
+                {similarNameMatches.length > 0 && (
+                  <Alert className="py-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription className="text-sm">
+                      Possible existing customer{similarNameMatches.length > 1 ? 's' : ''}:{' '}
+                      {similarNameMatches.map((customer) => `${customer.name} (${customer.customer_id})`).join(', ')}.
+                      {' '}Names may repeat. Consider adding a surname, initial, or location; you can still save this customer.
+                    </AlertDescription>
+                  </Alert>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-phone">Phone *</Label>
