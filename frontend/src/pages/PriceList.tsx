@@ -95,7 +95,7 @@ export default function PriceList() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
-  const itemsPerPage = 20;
+  const itemsPerPage = 40;
   
   // Dialogs
   const [addDialogOpen, setAddDialogOpen] = useState(false);

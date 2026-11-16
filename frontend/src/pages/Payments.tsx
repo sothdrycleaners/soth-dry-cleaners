@@ -240,7 +240,7 @@ const Payments = () => {
       setLoading(true);
       const params = new URLSearchParams({
         page: currentPage.toString(),
-        limit: '20',
+        limit: '40',
         ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v !== '')),
       });
 

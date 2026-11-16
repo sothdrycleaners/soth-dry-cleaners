@@ -111,7 +111,7 @@ export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [pagination, setPagination] = useState<Pagination>({
     page: 1,
-    limit: 20,
+    limit: 40,
     total: 0,
     totalPages: 0,
     hasMore: false,

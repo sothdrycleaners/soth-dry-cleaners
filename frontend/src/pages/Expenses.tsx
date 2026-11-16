@@ -214,7 +214,7 @@ const Expenses = () => {
 
       const params = new URLSearchParams({
         page: currentPage.toString(),
-        limit: '20',
+        limit: '40',
         ...activeFilters,
       });
 
