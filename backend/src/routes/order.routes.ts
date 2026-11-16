@@ -19,6 +19,7 @@ router.post('/bulk-delete', requireAdmin as any, orderController.bulkDeleteOrder
 router.get('/', orderController.getAllOrders as any);
 router.get('/:id', orderController.getOrderById as any);
 router.post('/', orderValidation.create, orderController.createOrder as any);
+router.put('/:id/items', orderController.updateOrderItems as any);
 router.put('/:id', orderValidation.update, orderController.updateOrder as any);
 router.put('/:id/status', orderValidation.updateStatus, orderController.updateOrderStatus as any);
 router.delete('/:id', requireAdmin as any, orderController.deleteOrder as any);

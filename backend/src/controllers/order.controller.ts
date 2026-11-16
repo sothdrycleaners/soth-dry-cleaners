@@ -403,10 +403,13 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
 
     // Get order items
     const itemsResult = await query(
-      `SELECT oi.*, p.name as item_name, p.category, p.item_id
+      `SELECT oi.*, p.name as item_name, p.category, p.item_id,
+        os.status as operations_status
       FROM order_items oi
-      JOIN price_items p ON oi.price_item_id = p.id
-      WHERE oi.order_id = $1`,
+      JOIN price_items p ON oi.price_item_id = p.id AND p.tenant_id = oi.tenant_id
+      LEFT JOIN public.operations_item_status os ON os.order_item_id = oi.id AND os.tenant_id = oi.tenant_id
+      WHERE oi.order_id = $1 AND oi.tenant_id = app_current_tenant_id()
+      ORDER BY oi.id`,
       [id]
     );
     
@@ -417,6 +420,250 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Get order error:', error);
     res.status(500).json({ error: 'Failed to fetch order' });
+  }
+};
+
+/**
+ * Reconcile an order's item lines while preserving payment ledger entries.
+ * Prices are always recalculated from this tenant's active price catalogue.
+ */
+export const updateOrderItems = async (req: AuthRequest, res: Response) => {
+  const client = await getClient();
+  const orderId = Number(req.params.id);
+  const requestedItems = req.body?.items;
+  const isAdmin = req.user?.role === 'ADMIN';
+  const rejectInvalid = (message: string): never => {
+    const error = new Error(message) as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  };
+
+  if (!Number.isSafeInteger(orderId) || orderId < 1) {
+    client.release();
+    return res.status(400).json({ error: 'A valid order ID is required' });
+  }
+  if (!Array.isArray(requestedItems) || requestedItems.length < 1 || requestedItems.length > 500) {
+    client.release();
+    return res.status(400).json({ error: 'Keep at least one order item. A maximum of 500 items is allowed.' });
+  }
+
+  try {
+    await beginTenantTransaction(client);
+    const orderResult = await client.query(
+      `SELECT * FROM public.orders WHERE id=$1 AND tenant_id=app_current_tenant_id() FOR UPDATE`,
+      [orderId]
+    );
+    const order = orderResult.rows[0];
+    if (!order) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    if (forbiddenIfOutsideBranch(req, res, order.branch_id)) {
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const orderStatus = String(order.status || '').toUpperCase();
+    if (!isAdmin && !['PENDING', 'RECEIVED', 'PROCESSING'].includes(orderStatus)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Items can only be edited before the order is marked Ready. Administrators can override this restriction.' });
+    }
+
+    const existingResult = await client.query(
+      `SELECT oi.*, os.status operations_status
+       FROM public.order_items oi
+       LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
+       WHERE oi.order_id=$1 AND oi.tenant_id=app_current_tenant_id()
+       FOR UPDATE OF oi`,
+      [orderId]
+    );
+    const existingById = new Map<number, any>(existingResult.rows.map((row: any) => [Number(row.id), row]));
+    const submittedIds = requestedItems
+      .filter((item: any) => item.id !== undefined && item.id !== null && Number(item.id) > 0)
+      .map((item: any) => Number(item.id));
+    if (new Set(submittedIds).size !== submittedIds.length || submittedIds.some((itemId: number) => !existingById.has(itemId))) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'The submitted items do not match this order.' });
+    }
+
+    const submittedIdSet = new Set(submittedIds);
+    const removedRows = existingResult.rows.filter((row: any) => !submittedIdSet.has(Number(row.id)));
+    if (!isAdmin && removedRows.some((row: any) => String(row.operations_status || 'RECEIVED').toUpperCase() === 'READY')) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'An item already marked Ready cannot be removed by staff. Ask an administrator to make this correction.' });
+    }
+    for (const item of requestedItems) {
+      const existing = item.id ? existingById.get(Number(item.id)) : null;
+      if (existing && !isAdmin && String(existing.operations_status || 'RECEIVED').toUpperCase() === 'READY') {
+        const incomingService = String(item.service_type || '').toUpperCase();
+        const changed = Number(item.price_item_id) !== Number(existing.price_item_id)
+          || incomingService !== String(existing.service_type || '').toUpperCase()
+          || Number(item.quantity) !== Number(existing.quantity);
+        if (changed) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'An item already marked Ready cannot be edited by staff. Ask an administrator to make this correction.' });
+        }
+      }
+    }
+
+    if (removedRows.length) {
+      await client.query(
+        `DELETE FROM public.order_items WHERE order_id=$1 AND tenant_id=app_current_tenant_id() AND id=ANY($2::int[])`,
+        [orderId, removedRows.map((row: any) => Number(row.id))]
+      );
+    }
+
+    const standardKgRateResult = await client.query(
+      `SELECT setting_value FROM public.business_settings
+       WHERE tenant_id=app_current_tenant_id() AND setting_key IN ('standard_kg_rate','kilogram_rate')
+       ORDER BY setting_key='standard_kg_rate' DESC LIMIT 1`
+    );
+    let standardKgRate = 10000;
+    if (standardKgRateResult.rows[0]?.setting_value !== undefined) {
+      const configured = Number(parseSettingJson(standardKgRateResult.rows[0].setting_value));
+      if (Number.isFinite(configured) && configured > 0) standardKgRate = configured;
+    }
+
+    for (const item of requestedItems) {
+      const priceItemId = Number(item.price_item_id);
+      const serviceType = String(item.service_type || 'WASH').toUpperCase();
+      const quantity = Number(item.quantity);
+      const existing = item.id ? existingById.get(Number(item.id)) : null;
+      if (!Number.isSafeInteger(priceItemId) || priceItemId < 1) rejectInvalid('Choose an item from the price list.');
+      if (!['WASH', 'IRON', 'EXPRESS'].includes(serviceType)) rejectInvalid('Choose Wash, Iron, or Express for every item.');
+      if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 10000) rejectInvalid('Item quantity must be greater than zero and no more than 10,000.');
+
+      const isUnchanged = existing
+        && Number(existing.price_item_id) === priceItemId
+        && String(existing.service_type || '').toUpperCase() === serviceType
+        && Number(existing.quantity) === quantity;
+      if (isUnchanged) continue;
+
+      const priceResult = await client.query(
+        `SELECT id,name,category,item_id,unit,COALESCE(pricing_type,'FIXED') pricing_type,
+          COALESCE(price_per_kg,0) price_per_kg,price,ironing_price,express_price,
+          discount_percentage,discount_start_date,discount_end_date,is_active,
+          CASE WHEN discount_percentage>0 AND discount_start_date<=NOW() AND discount_end_date>=NOW()
+            THEN ROUND(price*(1-discount_percentage/100)) ELSE price END effective_price,
+          CASE WHEN discount_percentage>0 AND discount_start_date<=NOW() AND discount_end_date>=NOW()
+            THEN ROUND(ironing_price*(1-discount_percentage/100)) ELSE ironing_price END effective_ironing_price,
+          CASE WHEN express_price IS NOT NULL THEN express_price
+            WHEN discount_percentage>0 AND discount_start_date<=NOW() AND discount_end_date>=NOW()
+            THEN ROUND(price*(1-discount_percentage/100))*2 ELSE price*2 END effective_express_price
+         FROM public.price_items
+         WHERE id=$1 AND tenant_id=app_current_tenant_id()`,
+        [priceItemId]
+      );
+      const priceItem = priceResult.rows[0];
+      if (!priceItem || !priceItem.is_active) rejectInvalid('This item is no longer active in the price list. Choose an active item.');
+
+      const isPerKg = String(priceItem.pricing_type).toUpperCase() === 'PER_KG' || String(priceItem.unit || '').toLowerCase() === 'kg';
+      if (!isPerKg && !Number.isInteger(quantity)) rejectInvalid(`${priceItem.name} requires a whole-number quantity.`);
+      if (isPerKg && Math.round(quantity * 10) / 10 !== quantity) rejectInvalid(`${priceItem.name} quantity can use up to one decimal place.`);
+      let unitPrice: number;
+      if (isPerKg) {
+        const baseRate = Number(priceItem.price_per_kg) > 0
+          ? Number(priceItem.price_per_kg)
+          : Number(priceItem.effective_price) || standardKgRate;
+        unitPrice = serviceType === 'EXPRESS' ? baseRate * 2 : baseRate;
+      } else if (serviceType === 'WASH') unitPrice = Number(priceItem.effective_price);
+      else if (serviceType === 'IRON') unitPrice = Number(priceItem.effective_ironing_price);
+      else unitPrice = Number(priceItem.effective_express_price);
+
+      const grossTotal = Math.round(quantity * unitPrice);
+      const discountAmount = Math.min(grossTotal, Math.max(0, Math.round(Number(existing?.discount_amount) || 0)));
+      const surchargeAmount = Math.max(0, Math.round(Number(existing?.surcharge_amount) || 0));
+      const totalPrice = Math.max(0, grossTotal + surchargeAmount - discountAmount);
+      const notes = typeof item.notes === 'string' ? item.notes.trim().slice(0, 200) || null : existing?.notes || null;
+      const expressDueAt = serviceType === 'EXPRESS' ? existing?.express_due_at || null : null;
+
+      if (existing) {
+        await client.query(
+          `UPDATE public.order_items SET price_item_id=$3,item_name=$4,service_type=$5,quantity=$6,
+            unit_price=$7,discount_amount=$8,surcharge_amount=$9,total_price=$10,notes=$11,
+            express_due_at=$12,updated_at=NOW()
+           WHERE id=$1 AND order_id=$2 AND tenant_id=app_current_tenant_id()`,
+          [existing.id,orderId,priceItemId,priceItem.name,serviceType,quantity,unitPrice,discountAmount,surchargeAmount,totalPrice,notes,expressDueAt]
+        );
+      } else {
+        const inserted = await client.query(
+          `INSERT INTO public.order_items(order_id,price_item_id,item_name,service_type,quantity,unit_price,discount_amount,surcharge_amount,total_price,notes,express_due_at)
+           VALUES($1,$2,$3,$4,$5,$6,0,0,$7,$8,$9) RETURNING id`,
+          [orderId,priceItemId,priceItem.name,serviceType,quantity,unitPrice,totalPrice,notes,expressDueAt]
+        );
+        const newItemId = Number(inserted.rows[0].id);
+        const initialOperationsStatus = ['READY','DELIVERED'].includes(orderStatus)
+          ? 'READY'
+          : orderStatus === 'PROCESSING' ? 'PROCESSING' : 'RECEIVED';
+        await client.query(
+          `INSERT INTO public.operations_item_status(tenant_id,order_id,order_item_id,status,ready_at,updated_by,updated_at)
+           SELECT app_current_tenant_id(),$1,$2,$3,CASE WHEN $3='READY' THEN NOW() ELSE NULL END,$4,NOW()
+           ON CONFLICT(tenant_id,order_item_id) DO UPDATE SET status=EXCLUDED.status,ready_at=EXCLUDED.ready_at,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
+          [orderId,newItemId,initialOperationsStatus,req.user!.id]
+        );
+      }
+    }
+
+    const subtotalResult = await client.query(
+      `SELECT COALESCE(SUM(total_price),0)::numeric subtotal FROM public.order_items
+       WHERE order_id=$1 AND tenant_id=app_current_tenant_id()`, [orderId]
+    );
+    const subtotal = Math.max(0, Math.round(Number(subtotalResult.rows[0]?.subtotal) || 0));
+    const percentage = Math.max(0, Number(order.discount_percentage) || 0);
+    const orderDiscount = percentage > 0
+      ? Math.round(subtotal * percentage / 100)
+      : Math.min(subtotal, Math.max(0, Math.round(Number(order.discount_amount) || 0)));
+    const bargain = Math.min(Math.max(0, subtotal - orderDiscount), Math.max(0, Math.round(Number(order.bargain_amount) || 0)));
+    const surcharge = Math.max(0, Math.round(Number(order.surcharge_amount) || 0));
+    const taxRate = Math.max(0, Number(order.tax_rate) || 0);
+    const taxable = Math.max(0, subtotal - orderDiscount - bargain + surcharge);
+    const taxAmount = taxRate > 0 ? Math.round(taxable * taxRate / 100) : 0;
+    const totalAmount = Math.max(0, subtotal - orderDiscount - bargain + surcharge + taxAmount);
+    const amountPaid = Math.max(0, Number(order.amount_paid) || 0);
+    const paymentStatus = amountPaid <= 0 ? 'UNPAID' : amountPaid >= totalAmount ? 'PAID' : 'PARTIAL';
+    const balance = Math.max(0, totalAmount - amountPaid);
+
+    await client.query(
+      `UPDATE public.orders SET subtotal=$2,discount_amount=$3,bargain_amount=$4,tax_amount=$5,
+        total_amount=$6,balance=$7,payment_status=$8,updated_at=NOW()
+       WHERE id=$1 AND tenant_id=app_current_tenant_id()`,
+      [orderId,subtotal,orderDiscount,bargain,taxAmount,totalAmount,balance,paymentStatus]
+    );
+
+    if (!['DELIVERED','CANCELLED'].includes(orderStatus)) {
+      const statusCounts = await client.query(
+        `SELECT COUNT(*)::int total,COUNT(*) FILTER(WHERE os.status='READY')::int ready
+         FROM public.order_items oi LEFT JOIN public.operations_item_status os
+          ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
+         WHERE oi.order_id=$1 AND oi.tenant_id=app_current_tenant_id()`, [orderId]
+      );
+      const allReady = Number(statusCounts.rows[0]?.total) > 0 && Number(statusCounts.rows[0]?.total) === Number(statusCounts.rows[0]?.ready);
+      if (allReady && orderStatus !== 'READY') {
+        await client.query("SELECT set_config('app.operations_status_update','true',true)");
+        await client.query("UPDATE public.orders SET status='READY' WHERE id=$1 AND tenant_id=app_current_tenant_id()", [orderId]);
+      }
+    }
+
+    const updatedOrder = await client.query('SELECT * FROM public.orders WHERE id=$1 AND tenant_id=app_current_tenant_id()', [orderId]);
+    const updatedItems = await client.query(
+      `SELECT oi.*,p.name item_name,p.category,p.item_id,os.status operations_status
+       FROM public.order_items oi JOIN public.price_items p ON p.id=oi.price_item_id AND p.tenant_id=oi.tenant_id
+       LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
+       WHERE oi.order_id=$1 AND oi.tenant_id=app_current_tenant_id() ORDER BY oi.id`, [orderId]
+    );
+    await client.query('COMMIT');
+
+    await logUpdate(req.user!.id,req.user!.email,req.user!.full_name,req.user!.role,'order',orderId,{
+      action:'order_items_updated', previous_item_count:existingResult.rows.length, item_count:updatedItems.rows.length,
+      previous_total:order.total_amount, total_amount:updatedOrder.rows[0].total_amount,
+    },req.ip);
+    res.json({ message:'Order items updated successfully', order:updatedOrder.rows[0], items:updatedItems.rows });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('Update order items error:', error);
+    res.status(error?.statusCode || 500).json({ error:error?.statusCode ? error.message : 'Failed to update order items' });
+  } finally {
+    client.release();
   }
 };
 

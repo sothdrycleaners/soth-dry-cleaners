@@ -39,7 +39,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Search, Eye, Calendar, User, Phone, Package, CreditCard, AlertCircle, CheckCircle2, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Truck, MapPin, MessageCircle, Printer, FileText, Settings2, Share2, Download, Mail, Trash2, ExternalLink, Bell, MessageSquare, StickyNote, X, ShieldAlert, Loader2, FileSpreadsheet } from 'lucide-react';
+import { Search, Eye, Calendar, User, Phone, Package, CreditCard, AlertCircle, CheckCircle2, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Truck, MapPin, MessageCircle, Printer, FileText, Settings2, Share2, Download, Mail, Trash2, ExternalLink, Bell, MessageSquare, StickyNote, X, ShieldAlert, Loader2, FileSpreadsheet, Plus } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -96,15 +96,35 @@ interface Order {
 
 interface OrderItem {
   id: number;
+  price_item_id: number;
   item_name: string;
+  category?: string | null;
   service_type: string;
   quantity: number;
   unit_price: number;
   total_price: number;
   discount_amount?: number;
   surcharge_amount?: number;
+  operations_status?: string | null;
+  unit?: string | null;
+  pricing_type?: string | null;
   /** Internal garment description — staff only, never printed for customers */
   notes?: string | null;
+}
+
+interface OrderPriceItem {
+  id: number;
+  name: string;
+  category?: string | null;
+  unit?: string | null;
+  pricing_type?: 'FIXED' | 'PER_KG';
+  price_per_kg?: number;
+  price: number;
+  ironing_price: number;
+  express_price?: number | null;
+  effective_price?: number;
+  effective_ironing_price?: number;
+  effective_express_price?: number;
 }
 
 interface PaymentTransaction {
@@ -625,6 +645,16 @@ export default function Orders() {
   const [loading, setLoading] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [editingOrderItems, setEditingOrderItems] = useState(false);
+  const [savingOrderItems, setSavingOrderItems] = useState(false);
+  const [orderItemsDirty, setOrderItemsDirty] = useState(false);
+  const [priceCatalog, setPriceCatalog] = useState<OrderPriceItem[]>([]);
+  const [loadingPriceCatalog, setLoadingPriceCatalog] = useState(false);
+  const [showAddOrderItem, setShowAddOrderItem] = useState(false);
+  const [orderItemSearch, setOrderItemSearch] = useState('');
+  const [orderItemCategory, setOrderItemCategory] = useState('ALL');
+  const originalOrderItems = useRef<OrderItem[]>([]);
+  const nextTemporaryItemId = useRef(-1);
   const [paymentTransactions, setPaymentTransactions] = useState<PaymentTransaction[]>([]);
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [orderDelivery, setOrderDelivery] = useState<OrderDelivery | null>(null);
@@ -1129,6 +1159,143 @@ export default function Orders() {
     setCurrentPage(prev => prev !== 1 ? 1 : prev);
   }, [searchQuery, statusFilter, paymentFilter, backdatedFilter, branchFilter]);
 
+  const orderItemsEditableForCurrentUser = (order: Order | null) => Boolean(
+    order && (isAdmin || ['pending', 'received', 'processing'].includes(String(order.order_status || '').toLowerCase()))
+  );
+
+  const canEditOrderItemRow = (item: OrderItem) => isAdmin
+    || String(item.operations_status || 'RECEIVED').toUpperCase() !== 'READY';
+
+  const catalogUnitPrice = (price: OrderPriceItem, service: string) => {
+    const normalizedService = service.toUpperCase();
+    const isPerKg = String(price.pricing_type || '').toUpperCase() === 'PER_KG'
+      || String(price.unit || '').toLowerCase() === 'kg';
+    if (isPerKg) {
+      const rate = Number(price.price_per_kg) > 0
+        ? Number(price.price_per_kg)
+        : Number(price.effective_price ?? price.price) || 10000;
+      return normalizedService === 'EXPRESS' ? rate * 2 : rate;
+    }
+    if (normalizedService === 'IRON') return Number(price.effective_ironing_price ?? price.ironing_price) || 0;
+    if (normalizedService === 'EXPRESS') return Number(price.effective_express_price ?? price.express_price ?? (Number(price.effective_price ?? price.price) * 2)) || 0;
+    return Number(price.effective_price ?? price.price) || 0;
+  };
+
+  const beginOrderItemsEdit = async () => {
+    if (!selectedOrder || !orderItemsEditableForCurrentUser(selectedOrder)) return;
+    if (!priceCatalog.length) {
+      try {
+        setLoadingPriceCatalog(true);
+        const response = await axios.get(`${API_BASE_URL}/prices`, {
+          headers: { Authorization: `Bearer ${token}` }, params: { active: true },
+        });
+        setPriceCatalog(response.data.prices || []);
+      } catch (error) {
+        toast({ variant: 'destructive', title: 'Price list unavailable', description: 'Could not load active price list items. Try again.' });
+        return;
+      } finally {
+        setLoadingPriceCatalog(false);
+      }
+    }
+    originalOrderItems.current = orderItems.map((item) => ({ ...item }));
+    setOrderItemsDirty(false);
+    setEditingOrderItems(true);
+  };
+
+  const updateEditableOrderItem = (lineId: number, patch: Partial<OrderItem>) => {
+    setOrderItems((current) => current.map((item) => {
+      if (item.id !== lineId || !canEditOrderItemRow(item)) return item;
+      const next = { ...item, ...patch };
+      const catalogItem = priceCatalog.find((price) => price.id === Number(next.price_item_id));
+      if (catalogItem) {
+        next.item_name = catalogItem.name;
+        next.category = catalogItem.category;
+        next.unit = catalogItem.unit;
+        next.pricing_type = catalogItem.pricing_type;
+        next.unit_price = catalogUnitPrice(catalogItem, next.service_type);
+      }
+      const gross = Math.round(Math.max(0, Number(next.quantity) || 0) * (Number(next.unit_price) || 0));
+      next.discount_amount = Math.min(gross, Math.max(0, Number(next.discount_amount) || 0));
+      next.total_price = Math.max(0, gross + Math.max(0, Number(next.surcharge_amount) || 0) - next.discount_amount);
+      return next;
+    }));
+    setOrderItemsDirty(true);
+  };
+
+  const addCatalogItemToOrder = (price: OrderPriceItem) => {
+    const unitPrice = catalogUnitPrice(price, 'WASH');
+    const nextItem: OrderItem = {
+      id: nextTemporaryItemId.current--,
+      price_item_id: price.id,
+      item_name: price.name,
+      category: price.category,
+      service_type: 'WASH',
+      quantity: 1,
+      unit_price: unitPrice,
+      total_price: unitPrice,
+      discount_amount: 0,
+      surcharge_amount: 0,
+      operations_status: String(selectedOrder?.order_status || '').toLowerCase() === 'processing' ? 'PROCESSING' : 'RECEIVED',
+      unit: price.unit,
+      pricing_type: price.pricing_type,
+      notes: null,
+    };
+    setOrderItems((current) => [...current, nextItem]);
+    setOrderItemsDirty(true);
+    setOrderItemSearch('');
+    setShowAddOrderItem(false);
+  };
+
+  const removeOrderItemLine = (item: OrderItem) => {
+    if (orderItems.length <= 1 || !canEditOrderItemRow(item)) return;
+    setOrderItems((current) => current.filter((line) => line.id !== item.id));
+    setOrderItemsDirty(true);
+  };
+
+  const cancelOrderItemsEdit = () => {
+    setOrderItems(originalOrderItems.current.map((item) => ({ ...item })));
+    setOrderItemsDirty(false);
+    setEditingOrderItems(false);
+    setShowAddOrderItem(false);
+  };
+
+  const saveOrderItemsEdit = async () => {
+    if (!selectedOrder || savingOrderItems || orderItems.length === 0) return;
+    try {
+      setSavingOrderItems(true);
+      const response = await axios.put(`${API_BASE_URL}/orders/${selectedOrder.id}/items`, {
+        items: orderItems.map((item) => ({
+          ...(item.id > 0 ? { id: item.id } : {}),
+          price_item_id: item.price_item_id,
+          service_type: item.service_type,
+          quantity: item.quantity,
+          notes: item.notes || '',
+        })),
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      const savedOrder = response.data.order;
+      const savedItems = response.data.items || [];
+      const savedOrderForUi = { ...savedOrder, order_status: savedOrder.status };
+      setSelectedOrder((current) => current?.id === selectedOrder.id ? { ...current, ...savedOrderForUi } : current);
+      setOrders((current) => current.map((order) => order.id === selectedOrder.id ? { ...order, ...savedOrderForUi } : order));
+      setOrderItems(savedItems);
+      originalOrderItems.current = savedItems.map((item: OrderItem) => ({ ...item }));
+      setOrderItemsDirty(false);
+      setEditingOrderItems(false);
+      setShowAddOrderItem(false);
+      toast({ title: 'Order items updated', description: 'The order total and balance have been recalculated.' });
+    } catch (error: unknown) {
+      toast({
+        variant: 'destructive',
+        title: 'Could not update order items',
+        description: axios.isAxiosError<{ error?: string }>(error)
+          ? error.response?.data?.error || 'Please try again.'
+          : 'Please try again.',
+      });
+    } finally {
+      setSavingOrderItems(false);
+    }
+  };
+
   // View order details
   const viewOrderDetails = async (order: Order) => {
     if (!order || !order.id) {
@@ -1152,7 +1319,12 @@ export default function Orders() {
       }
       
       setSelectedOrder(response.data.order);
-      setOrderItems(response.data.items || []);
+      const fetchedItems = response.data.items || [];
+      setOrderItems(fetchedItems);
+      originalOrderItems.current = fetchedItems.map((item: OrderItem) => ({ ...item }));
+      setEditingOrderItems(false);
+      setOrderItemsDirty(false);
+      setShowAddOrderItem(false);
       setPaymentTransactions([]);
       setPaymentTransactionsPage(1);
       setOrderDelivery(null);
@@ -2193,10 +2365,90 @@ export default function Orders() {
 
               {/* Order Items */}
               <div>
-                <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
-                  <Package className="h-5 w-5" />
-                  Order Items ({orderItems.length})
-                </h3>
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="font-semibold text-lg flex items-center gap-2"><Package className="h-5 w-5" />Order Items ({orderItems.length})</h3>
+                  {!editingOrderItems && orderItemsEditableForCurrentUser(selectedOrder) && (
+                    <Button size="sm" variant="outline" onClick={() => void beginOrderItemsEdit()} disabled={loadingPriceCatalog}>
+                      {loadingPriceCatalog ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Edit className="h-4 w-4 mr-2" />}Edit items
+                    </Button>
+                  )}
+                  {editingOrderItems && <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={cancelOrderItemsEdit} disabled={savingOrderItems}>Cancel</Button>
+                    <Button size="sm" onClick={() => void saveOrderItemsEdit()} disabled={!orderItemsDirty || savingOrderItems}>
+                      {savingOrderItems && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save changes
+                    </Button>
+                  </div>}
+                </div>
+                {editingOrderItems ? (
+                  <div className="space-y-3">
+                    <div className="flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-muted-foreground">Changes use current price list rates, recalculate the balance, and preserve recorded payments.</p>
+                      <Button size="sm" variant="outline" onClick={() => setShowAddOrderItem((open) => !open)}><Plus className="h-4 w-4 mr-1" />Add item</Button>
+                    </div>
+                    {showAddOrderItem && <div className="space-y-3 rounded-lg border p-3">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
+                        <Input value={orderItemSearch} onChange={(event) => setOrderItemSearch(event.target.value)} placeholder="Search price list" aria-label="Search price list" />
+                        <Select value={orderItemCategory} onValueChange={setOrderItemCategory}>
+                          <SelectTrigger aria-label="Filter by category"><SelectValue placeholder="All categories" /></SelectTrigger>
+                          <SelectContent><SelectItem value="ALL">All categories</SelectItem>
+                            {Array.from(new Set(priceCatalog.map((price) => price.category).filter((category): category is string => Boolean(category))))
+                              .sort((a, b) => a.localeCompare(b)).map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid max-h-52 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+                        {priceCatalog.filter((price) => orderItemCategory === 'ALL' || price.category === orderItemCategory)
+                          .filter((price) => `${price.name} ${price.category || ''}`.toLowerCase().includes(orderItemSearch.trim().toLowerCase()))
+                          .map((price) => <button key={price.id} type="button" onClick={() => addCatalogItemToOrder(price)} className="flex min-w-0 items-center justify-between gap-2 rounded-md border p-2 text-left transition-colors hover:border-primary hover:bg-primary/5">
+                            <span className="min-w-0"><span className="block truncate font-medium">{price.name}</span><span className="block truncate text-xs text-muted-foreground">{price.category || 'Uncategorized'}{price.unit ? ` · ${price.unit}` : ''}</span></span>
+                            <span className="shrink-0 text-sm font-semibold">{formatUGX(catalogUnitPrice(price, 'WASH'))}</span>
+                          </button>)}
+                        {priceCatalog.filter((price) => (orderItemCategory === 'ALL' || price.category === orderItemCategory)
+                          && `${price.name} ${price.category || ''}`.toLowerCase().includes(orderItemSearch.trim().toLowerCase())).length === 0 &&
+                          <p className="col-span-full py-4 text-center text-sm text-muted-foreground">No matching active price list items.</p>}
+                      </div>
+                    </div>}
+
+                    <div className="space-y-2 md:hidden">
+                      {orderItems.map((item) => {
+                        const rowEditable = canEditOrderItemRow(item);
+                        const priceExists = priceCatalog.some((price) => price.id === Number(item.price_item_id));
+                        const perKg = String(item.pricing_type || '').toUpperCase() === 'PER_KG' || String(item.unit || '').toLowerCase() === 'kg';
+                        return <div key={item.id} className={`space-y-3 rounded-lg border p-3 ${!rowEditable ? 'bg-muted/50' : ''}`}>
+                          <div className="flex items-center justify-between gap-2"><Badge variant="outline">{rowEditable ? 'Editable item' : 'Ready · view only'}</Badge><span className="font-semibold">{formatUGX(item.total_price)}</span></div>
+                          <div className="space-y-1"><Label htmlFor={`order-item-${item.id}`}>Item</Label><select id={`order-item-${item.id}`} className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={String(item.price_item_id)} disabled={!rowEditable} onChange={(event) => updateEditableOrderItem(item.id, { price_item_id: Number(event.target.value) })}>
+                            {!priceExists && <option value={item.price_item_id}>{item.item_name} (inactive)</option>}{priceCatalog.map((price) => <option key={price.id} value={price.id}>{price.category ? `${price.category} · ` : ''}{price.name}</option>)}
+                          </select></div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1"><Label htmlFor={`order-service-${item.id}`}>Service</Label><select id={`order-service-${item.id}`} className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={item.service_type.toUpperCase()} disabled={!rowEditable} onChange={(event) => updateEditableOrderItem(item.id, { service_type: event.target.value })}><option value="WASH">Wash</option><option value="IRON">Iron</option><option value="EXPRESS">Express</option></select></div>
+                            <div className="space-y-1"><Label htmlFor={`order-quantity-${item.id}`}>Quantity</Label><Input id={`order-quantity-${item.id}`} type="number" min={perKg ? '0.1' : '1'} step={perKg ? '0.1' : '1'} value={item.quantity} disabled={!rowEditable} onChange={(event) => updateEditableOrderItem(item.id, { quantity: Number(event.target.value) })} /></div>
+                          </div>
+                          <div className="flex items-center justify-between border-t pt-2 text-sm"><span className="text-muted-foreground">{formatUGX(item.unit_price)} each</span><Button size="sm" variant="ghost" className="text-destructive" title="Remove item" disabled={!rowEditable || orderItems.length <= 1} onClick={() => removeOrderItemLine(item)}><Trash2 className="h-4 w-4 mr-1" />Remove</Button></div>
+                          {item.notes?.trim() && <p className="border-t pt-2 text-xs text-amber-800 dark:text-amber-300">Note: {item.notes.trim()}</p>}
+                        </div>;
+                      })}
+                    </div>
+                    <div className="hidden overflow-x-auto rounded-lg border md:block"><Table>
+                      <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Service</TableHead><TableHead>Quantity</TableHead><TableHead>Unit price</TableHead><TableHead>Adjustment</TableHead><TableHead>Total</TableHead><TableHead className="w-12" /></TableRow></TableHeader>
+                      <TableBody>{orderItems.map((item) => {
+                        const rowEditable = canEditOrderItemRow(item);
+                        const priceExists = priceCatalog.some((price) => price.id === Number(item.price_item_id));
+                        const perKg = String(item.pricing_type || '').toUpperCase() === 'PER_KG' || String(item.unit || '').toLowerCase() === 'kg';
+                        return <TableRow key={item.id} className={!rowEditable ? 'bg-muted/50' : ''}>
+                          <TableCell className="min-w-[220px]"><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={String(item.price_item_id)} disabled={!rowEditable} aria-label={`Item for ${item.item_name}`} onChange={(event) => updateEditableOrderItem(item.id, { price_item_id: Number(event.target.value) })}>
+                            {!priceExists && <option value={item.price_item_id}>{item.item_name} (inactive)</option>}{priceCatalog.map((price) => <option key={price.id} value={price.id}>{price.category ? `${price.category} · ` : ''}{price.name}</option>)}
+                          </select>{!rowEditable && <span className="mt-1 block text-xs text-muted-foreground">Ready item locked for staff.</span>}</TableCell>
+                          <TableCell><select className="h-10 rounded-md border bg-background px-3 text-sm" value={item.service_type.toUpperCase()} disabled={!rowEditable} aria-label={`Service for ${item.item_name}`} onChange={(event) => updateEditableOrderItem(item.id, { service_type: event.target.value })}><option value="WASH">Wash</option><option value="IRON">Iron</option><option value="EXPRESS">Express</option></select></TableCell>
+                          <TableCell><Input className="w-24" type="number" min={perKg ? '0.1' : '1'} step={perKg ? '0.1' : '1'} value={item.quantity} disabled={!rowEditable} aria-label={`Quantity for ${item.item_name}`} onChange={(event) => updateEditableOrderItem(item.id, { quantity: Number(event.target.value) })} /></TableCell>
+                          <TableCell className="whitespace-nowrap">{formatUGX(item.unit_price)}</TableCell>
+                          <TableCell className="whitespace-nowrap text-xs">{Number(item.discount_amount || 0) > 0 && <span className="block text-primary">-{formatUGX(item.discount_amount)}</span>}{Number(item.surcharge_amount || 0) > 0 && <span className="block text-amber-600">+{formatUGX(item.surcharge_amount)}</span>}{!Number(item.discount_amount || 0) && !Number(item.surcharge_amount || 0) && '—'}</TableCell>
+                          <TableCell className="whitespace-nowrap font-semibold">{formatUGX(item.total_price)}</TableCell><TableCell><Button size="icon" variant="ghost" className="text-destructive" title="Remove item" disabled={!rowEditable || orderItems.length <= 1} onClick={() => removeOrderItemLine(item)}><Trash2 className="h-4 w-4" /></Button></TableCell>
+                        </TableRow>;
+                      })}</TableBody>
+                    </Table></div>
+                  </div>
+                ) : (
+                  <>
                 {/* Phones get stacked cards; a five-column table would only be
                     readable by scrolling sideways */}
                 <div className="space-y-2 md:hidden">
@@ -2289,6 +2541,8 @@ export default function Orders() {
                     </TableBody>
                   </Table>
                 </div>
+                  </>
+                )}
               </div>
 
               {/* Payment Transactions History */}
