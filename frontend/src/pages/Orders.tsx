@@ -723,7 +723,7 @@ export default function Orders() {
   const updatingOrderStatusRef = useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalOrders, setTotalOrders] = useState(0);
-  const pageSize = 20;
+  const pageSize = 80;
   
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState({
