@@ -612,11 +612,6 @@ export const getRecentOrders = async (req: AuthRequest, res: Response) => {
             SELECT MAX(GREATEST(p.created_at, p.updated_at))
             FROM payments p 
             WHERE p.order_id = o.id AND p.tenant_id = o.tenant_id
-          ), COALESCE(o.recorded_at, o.created_at)),
-          COALESCE((
-            SELECT MAX(oi.updated_at)
-            FROM order_items oi
-            WHERE oi.order_id = o.id AND oi.tenant_id = o.tenant_id
           ), COALESCE(o.recorded_at, o.created_at))
         ) as last_activity
       FROM orders o
