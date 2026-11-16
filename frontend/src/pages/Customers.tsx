@@ -132,8 +132,6 @@ export default function Customers() {
   
   // Dialog states
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [sameNameConfirmOpen, setSameNameConfirmOpen] = useState(false);
-  const [sameNameConfirmValue, setSameNameConfirmValue] = useState('');
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -382,7 +380,7 @@ export default function Customers() {
     fetchCustomers();
   };
 
-  const handleAddCustomer = async (confirmedName?: string) => {
+  const handleAddCustomer = async () => {
     // Guard against double-clicks creating the customer twice: the second
     // request would hit the duplicate-phone check and show a false error.
     if (isSubmitting) return;
@@ -390,7 +388,7 @@ export default function Customers() {
     try {
       const token = localStorage.getItem("soth_token");
       
-      const customerName = (confirmedName ?? formData.name).trim();
+      const customerName = formData.name.trim();
       if (!customerName) {
         toast.error("Customer name is required");
         return;
@@ -408,22 +406,6 @@ export default function Customers() {
       }
 
       setIsSubmitting(true);
-      if (confirmedName === undefined) {
-        const nameCheck = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: { name: customerName },
-        });
-        const matches = nameCheck.data?.duplicates?.similarNames || [];
-        setSimilarNameMatches(matches);
-        const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-        const exactNameMatches = matches.filter((customer: Customer) => normalizeName(customer.name) === normalizeName(customerName));
-        if (exactNameMatches.length > 0) {
-          setSameNameConfirmValue(customerName);
-          setSameNameConfirmOpen(true);
-          return;
-        }
-      }
-
       await axios.post(
         `${API_BASE_URL}/customers`,
         { ...formData, name: customerName, phone: phoneResult.e164 },
@@ -432,7 +414,6 @@ export default function Customers() {
       
       toast.success("Customer added successfully");
       setIsAddDialogOpen(false);
-      setSameNameConfirmOpen(false);
       resetForm();
       fetchCustomers();
       fetchStats(); // Refresh statistics
@@ -1081,28 +1062,6 @@ export default function Customers() {
               disabled={isSubmitting || phoneHint.kind === 'country' || phoneHint.kind === 'duplicate'}
             >
               {isSubmitting ? 'Checking and adding…' : 'Add Customer'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={sameNameConfirmOpen} onOpenChange={setSameNameConfirmOpen}>
-        <DialogContent className="max-w-[95vw] sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Customer with this name already exists</DialogTitle>
-            <DialogDescription>
-              {similarNameMatches.filter((customer) => customer.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase() === sameNameConfirmValue.trim().replace(/\s+/g, ' ').toLocaleLowerCase()).map((customer) => `${customer.name} (${customer.customer_id})`).join(', ')}
-              {' '}has the same name. You can add a surname or another distinction, or confirm this name as entered. A different phone number is still required.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="confirm-customer-name">Customer name</Label>
-            <Input id="confirm-customer-name" value={sameNameConfirmValue} onChange={(event) => setSameNameConfirmValue(event.target.value)} maxLength={CUSTOMER_LIMITS.name} />
-          </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setSameNameConfirmOpen(false)}>Go back</Button>
-            <Button onClick={() => handleAddCustomer(sameNameConfirmValue)} disabled={isSubmitting || !sameNameConfirmValue.trim()}>
-              Confirm and add customer
             </Button>
           </DialogFooter>
         </DialogContent>

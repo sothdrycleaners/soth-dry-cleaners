@@ -280,8 +280,6 @@ export default function NewOrder() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerPopover, setShowCustomerPopover] = useState(false);
   const [showAddCustomerDialog, setShowAddCustomerDialog] = useState(false);
-  const [sameQuickNameConfirmOpen, setSameQuickNameConfirmOpen] = useState(false);
-  const [sameQuickNameConfirmValue, setSameQuickNameConfirmValue] = useState('');
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [similarQuickAddNames, setSimilarQuickAddNames] = useState<Array<Pick<Customer, 'name' | 'customer_id'>>>([]);
 
@@ -1030,8 +1028,8 @@ export default function NewOrder() {
   };
 
   // Handle quick add customer
-  const handleQuickAddCustomer = async (confirmedName?: string) => {
-    const customerName = (confirmedName ?? newCustomerForm.name).trim();
+  const handleQuickAddCustomer = async () => {
+    const customerName = newCustomerForm.name.trim();
     if (!customerName || !newCustomerForm.phone) {
       toast({
         variant: 'destructive',
@@ -1043,26 +1041,6 @@ export default function NewOrder() {
 
     if (addingCustomer) {
       return;
-    }
-
-    setAddingCustomer(true);
-    if (confirmedName === undefined) {
-      try {
-        const nameCheck = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
-          headers: { Authorization: `Bearer ${token}` }, params: { name: customerName },
-        });
-        const matches = nameCheck.data?.duplicates?.similarNames || [];
-        setSimilarQuickAddNames(matches);
-        const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-        if (matches.some((customer: Customer) => normalizeName(customer.name) === normalizeName(customerName))) {
-          setSameQuickNameConfirmValue(customerName);
-          setSameQuickNameConfirmOpen(true);
-          setAddingCustomer(false);
-          return;
-        }
-      } catch {
-        // The API will still enforce phone uniqueness if the advisory name check is unavailable.
-      }
     }
 
     try {
@@ -1077,7 +1055,6 @@ export default function NewOrder() {
       await fetchCustomers(); // Refresh customer list
       setSelectedCustomer(newCustomer);
       setShowAddCustomerDialog(false);
-      setSameQuickNameConfirmOpen(false);
       setNewCustomerForm({
         name: '',
         phone: '',
@@ -2600,28 +2577,6 @@ export default function NewOrder() {
                 <UserPlus className="mr-2 h-4 w-4" />
               )}
               {addingCustomer ? 'Checking and adding...' : 'Add Customer'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={sameQuickNameConfirmOpen} onOpenChange={setSameQuickNameConfirmOpen}>
-        <DialogContent className="max-w-[95vw] sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Customer with this name already exists</DialogTitle>
-            <DialogDescription>
-              {similarQuickAddNames.filter((customer) => customer.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase() === sameQuickNameConfirmValue.trim().replace(/\s+/g, ' ').toLocaleLowerCase()).map((customer) => `${customer.name} (${customer.customer_id})`).join(', ')}
-              {' '}has the same name. Add a surname or another distinction, or confirm the name as entered. A different phone number is still required.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="confirm-quick-customer-name">Customer name</Label>
-            <Input id="confirm-quick-customer-name" value={sameQuickNameConfirmValue} onChange={(event) => setSameQuickNameConfirmValue(event.target.value)} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSameQuickNameConfirmOpen(false)}>Go back</Button>
-            <Button onClick={() => handleQuickAddCustomer(sameQuickNameConfirmValue)} disabled={addingCustomer || !sameQuickNameConfirmValue.trim()}>
-              Confirm and add customer
             </Button>
           </DialogFooter>
         </DialogContent>
