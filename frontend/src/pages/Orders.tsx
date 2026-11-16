@@ -192,11 +192,6 @@ const formatDate = (dateString: string | null | undefined) => {
 const formatDateTime = (dateString: string) => formatKampalaDateTime(dateString);
 
 const defaultPaymentYmd = () => kampalaTodayYmd();
-const previousKampalaPaymentYmd = () => {
-  const [year, month, day] = kampalaTodayYmd().split('-').map(Number);
-  const previous = new Date(Date.UTC(year, month - 1, day - 1));
-  return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}-${String(previous.getUTCDate()).padStart(2, '0')}`;
-};
 
 const getDaysOld = (createdAt: string): string => {
   const diffDays = getKampalaCalendarAge(createdAt);
@@ -703,7 +698,6 @@ export default function Orders() {
   const [recordingPayment, setRecordingPayment] = useState(false);
   const recordingPaymentRef = useRef(false);
   const [paymentDate, setPaymentDate] = useState(kampalaTodayYmd());
-  const [historicalPayment, setHistoricalPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY' | 'BANK_TRANSFER'>('CASH');
   const [mobileMoneyProvider, setMobileMoneyProvider] = useState<'MTN' | 'AIRTEL'>('MTN');
   const [paymentChannel, setPaymentChannel] = useState<'MANUAL' | 'MERCHANT' | 'P2P' | 'DEPOSIT' | 'API_PUSH'>('MANUAL');
@@ -1428,8 +1422,8 @@ export default function Orders() {
         {
           amount: additionalPayment,
           payment_method: finalPaymentMethod,
-          historical_payment: historicalPayment,
-          ...(historicalPayment ? { payment_date: paymentDate } : {}),
+          historical_payment: paymentDate < kampalaTodayYmd(),
+          payment_date: paymentDate,
           transaction_reference: transactionReference || null,
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -1457,7 +1451,6 @@ export default function Orders() {
       setSenderPhone('');
       setTransactionReference('');
       setPaymentDate(kampalaTodayYmd());
-      setHistoricalPayment(false);
       fetchOrders();
       if (selectedOrder) viewOrderDetails(selectedOrder);
     } catch (error) {
@@ -2739,7 +2732,6 @@ export default function Orders() {
                       setAdditionalPayment(remaining > 0 ? remaining : totalAmt);
                       setPaymentMethod('CASH');
                       setPaymentDate(defaultPaymentYmd());
-                      setHistoricalPayment(false);
                       setShowPaymentDialog(true);
                     }}
                   >
@@ -3160,7 +3152,6 @@ export default function Orders() {
                           : parseFloat(String(selectedOrder.total_amount)) || 0
                       );
                       setPaymentDate(defaultPaymentYmd());
-                      setHistoricalPayment(false);
                       setShowPaymentDialog(true);
                     }}
                     variant="default"
@@ -3297,6 +3288,7 @@ export default function Orders() {
           {selectedOrder && (
             <div className="space-y-4">
               {(() => {
+                const canRecordPastPayment = isAdmin || user?.role === 'MANAGER' || selectedOrder.is_backdated;
                 const remainingDue = Math.max(
                   0,
                   parseFloat(String(selectedOrder.total_amount)) - parseFloat(String(selectedOrder.amount_paid))
@@ -3352,36 +3344,22 @@ export default function Orders() {
               </div>
 
               <div>
-                {(isAdmin || user?.role === 'MANAGER' || selectedOrder.is_backdated) && <div className="flex items-center gap-2">
-                  <Checkbox id="historical-payment" checked={historicalPayment} onCheckedChange={(checked) => {
-                    const enabled = Boolean(checked);
-                    setHistoricalPayment(enabled);
-                    if (!enabled) setPaymentDate(kampalaTodayYmd());
-                    else {
-                      const orderYmd = toKampalaYmd(selectedOrder.created_at);
-                      setPaymentDate(selectedOrder.is_backdated && orderYmd < kampalaTodayYmd()
-                        ? orderYmd
-                        : previousKampalaPaymentYmd());
-                    }
-                  }} disabled={recordingPayment} />
-                  <Label htmlFor="historical-payment">Record a historical payment</Label>
-                </div>}
-                <Label htmlFor="payment-date">{historicalPayment ? 'Date payment was received' : 'Payment date: today'}</Label>
+                <Label htmlFor="payment-date">Payment Date</Label>
                 <Input
                   id="payment-date"
                   type="date"
-                  max={previousKampalaPaymentYmd()}
+                  min={canRecordPastPayment ? undefined : kampalaTodayYmd()}
+                  max={kampalaTodayYmd()}
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
-                  className={historicalPayment ? 'mt-2' : 'hidden'}
-                  disabled={recordingPayment || !historicalPayment}
+                  className="mt-2"
+                  disabled={recordingPayment}
+                  required
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  {historicalPayment
-                    ? 'Choose the past date this payment was received.'
-                    : selectedOrder.is_backdated
-                      ? 'This order was entered historically. Tick “Record a historical payment” to choose when the payment was received; otherwise it is recorded as today.'
-                      : 'Defaults to today. Tick “Record a historical payment” to choose a past date.'}
+                  {canRecordPastPayment
+                    ? 'Defaults to today. Choose an earlier date to record a historical payment.'
+                    : 'Defaults to today. Historical payment dates are available for historical orders.'}
                 </p>
               </div>
 
