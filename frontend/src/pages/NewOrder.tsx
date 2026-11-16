@@ -2255,7 +2255,7 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT' && (
+              {paymentMethod !== 'ON_ACCOUNT' && (
                 <div className="border border-dashed border-blue-400 rounded-lg px-3 py-2 bg-blue-50 dark:bg-blue-950/30">
                   <div className="flex items-center gap-2">
                     <Checkbox id="historical-payment-create" checked={historicalPayment}
