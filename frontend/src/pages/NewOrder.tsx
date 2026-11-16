@@ -226,6 +226,12 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
 
 const BRANCH_PREFERENCE_KEY = 'newOrderBranchId';
 
+function previousKampalaDay(): string {
+  const previousDay = new Date(`${kampalaTodayYmd()}T12:00:00`);
+  previousDay.setDate(previousDay.getDate() - 1);
+  return `${previousDay.getFullYear()}-${String(previousDay.getMonth() + 1).padStart(2, '0')}-${String(previousDay.getDate()).padStart(2, '0')}`;
+}
+
 export default function NewOrder() {
   const { token, user } = useAuth();
   const { toast } = useToast();
@@ -253,6 +259,7 @@ export default function NewOrder() {
   const [orderDate, setOrderDate] = useState(kampalaTodayYmd());
   const [historicalPayment, setHistoricalPayment] = useState(false);
   const [historicalPaymentDate, setHistoricalPaymentDate] = useState(kampalaTodayYmd());
+  const isHistoricalOrder = useBackdate && orderDate < kampalaTodayYmd();
   /** Per-item adjustment mode: 'bargain' = reduce price, 'priceup' = increase price */
   const [itemAdjModes, setItemAdjModes] = useState<Record<number, 'bargain' | 'priceup'>>({});
   const getItemAdjMode = (index: number) => itemAdjModes[index] ?? 'bargain';
@@ -1221,8 +1228,10 @@ export default function NewOrder() {
         notes,
         branch_id: selectedBranchId ? Number(selectedBranchId) : undefined,
         ...(canBackdate && useBackdate ? { order_date: orderDate } : {}),
-        historical_payment: historicalPayment && amountPaid > 0,
-        ...(historicalPayment && amountPaid > 0 ? { payment_date: historicalPaymentDate } : {}),
+        historical_payment: historicalPayment && amountPaid > 0 && (canChooseBranch || isHistoricalOrder),
+        ...(historicalPayment && amountPaid > 0 && (canChooseBranch || isHistoricalOrder)
+          ? { payment_date: historicalPaymentDate }
+          : {}),
       };
 
       const response = await axios.post(`${API_BASE_URL}/orders`, orderData, {
@@ -2246,7 +2255,7 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {canChooseBranch && amountPaid > 0 && (
+              {(canChooseBranch || isHistoricalOrder) && amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT' && (
                 <div className="border border-dashed border-blue-400 rounded-lg px-3 py-2 bg-blue-50 dark:bg-blue-950/30">
                   <div className="flex items-center gap-2">
                     <Checkbox id="historical-payment-create" checked={historicalPayment}
@@ -2255,9 +2264,7 @@ export default function NewOrder() {
                         setHistoricalPayment(enabled);
                         if (!enabled) setHistoricalPaymentDate(kampalaTodayYmd());
                         else {
-                          const previousDay = new Date();
-                          previousDay.setDate(previousDay.getDate() - 1);
-                          setHistoricalPaymentDate(`${previousDay.getFullYear()}-${String(previousDay.getMonth() + 1).padStart(2, '0')}-${String(previousDay.getDate()).padStart(2, '0')}`);
+                          setHistoricalPaymentDate(isHistoricalOrder ? orderDate : previousKampalaDay());
                         }
                       }} />
                     <label htmlFor="historical-payment-create" className="text-xs font-medium cursor-pointer select-none">
@@ -2266,7 +2273,7 @@ export default function NewOrder() {
                   </div>
                   {historicalPayment && <div className="mt-2 flex items-center gap-2">
                     <label htmlFor="historical-payment-date" className="text-xs whitespace-nowrap">Payment Date:</label>
-                    <input id="historical-payment-date" type="date" max={kampalaTodayYmd()} value={historicalPaymentDate}
+                    <input id="historical-payment-date" type="date" max={previousKampalaDay()} value={historicalPaymentDate}
                       onChange={(e) => setHistoricalPaymentDate(e.target.value)}
                       className="text-xs border rounded px-2 py-1 h-7 bg-background text-foreground flex-1" />
                   </div>}
