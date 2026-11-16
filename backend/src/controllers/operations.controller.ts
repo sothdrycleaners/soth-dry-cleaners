@@ -102,11 +102,39 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
       values
     );
     const result = await listOrders(req);
+    const startedOrders = await query(
+      `SELECT o.id,o.order_number,o.status order_status,
+        COALESCE(bool_or(upper(COALESCE(oi.service_type,''))='EXPRESS'),FALSE) is_express,
+        o.branch_id,b.name branch_name,COALESCE(o.recorded_at,o.created_at) received_at,
+        c.name customer_name,
+        COALESCE(json_agg(json_build_object(
+          'id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,
+          'service_type',oi.service_type,'express_due_at',oi.express_due_at,
+          'status',CASE WHEN upper(o.status::text) IN ('READY','DELIVERED') THEN 'READY'
+            WHEN upper(o.status::text)='PROCESSING' AND COALESCE(os.status,'RECEIVED')='RECEIVED' THEN 'PROCESSING'
+            ELSE COALESCE(os.status,'RECEIVED') END,
+          'ready_at',os.ready_at
+        ) ORDER BY oi.id) FILTER(WHERE oi.id IS NOT NULL),'[]'::json) items,
+        MAX(os.updated_at) last_worked_at
+       FROM public.orders o
+       JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
+       LEFT JOIN public.branches b ON b.id=o.branch_id
+       LEFT JOIN public.order_items oi ON oi.order_id=o.id AND oi.tenant_id=o.tenant_id
+       LEFT JOIN public.price_items pi ON pi.id=oi.price_item_id AND pi.tenant_id=oi.tenant_id
+       LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
+       WHERE upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')${branchClause}
+       GROUP BY o.id,c.id,b.id
+       HAVING BOOL_OR(os.status='READY' AND os.updated_by IS NOT NULL)
+       ORDER BY MAX(os.updated_at) DESC NULLS LAST,o.id DESC
+       LIMIT 12`,
+      values
+    );
     const row = totals.rows[0] || {};
     res.json({
       order_counts: { received: Number(row.received || 0), processing: Number(row.processing || 0), ready: Number(row.ready || 0) },
       total_active_orders: Number(row.active_orders || 0),
-      express_orders: result.orders.filter((o: any) => o.is_express).slice(0, 8)
+      express_orders: result.orders.filter((o: any) => o.is_express).slice(0, 8),
+      in_progress_orders: startedOrders.rows,
     });
   } catch (error) { console.error('Operations summary error:', error); res.status(500).json({ error: 'Unable to load Operations summary' }); }
 };export const getOperationsDelivered = async (req: AuthRequest, res: Response) => {
