@@ -302,15 +302,23 @@ export default function Dashboard() {
         : {};
       
       // Core dashboard data should not wait for optional financial panels.
+      const recentOrdersRequest = axios.get(`${API_BASE_URL}/dashboard/recent-orders`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10, ...branchParams }
+      }).then((response) => {
+        // Keep recent orders fresh even if an unrelated dashboard request fails.
+        if (requestId === dashboardRequestId.current) {
+          setRecentOrders(response.data.orders || []);
+        }
+        return response;
+      });
+
       const coreResponses = await Promise.all([
         axios.get(`${API_BASE_URL}/dashboard/stats`, {
           headers: { Authorization: `Bearer ${token}` },
           params: { period: dashboardPeriod, ...dateParams, ...branchParams },
         }),
-        axios.get(`${API_BASE_URL}/dashboard/recent-orders`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: { limit: 10, ...branchParams }
-        }),
+        recentOrdersRequest,
         axios.get(`${API_BASE_URL}/settings/business-hours`, {
           headers: { Authorization: `Bearer ${token}` }
         })
