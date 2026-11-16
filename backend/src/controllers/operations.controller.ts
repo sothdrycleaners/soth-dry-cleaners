@@ -65,7 +65,7 @@ async function listOrders(req: AuthRequest, delivered = false) {
       COALESCE(o.recorded_at,o.created_at) received_at,o.due_date,
       c.name customer_name,c.customer_id customer_number,u.full_name recorded_by,
       COALESCE(json_agg(json_build_object('id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,'service_type',oi.service_type,'express_due_at',oi.express_due_at,
-        'status',CASE WHEN upper(o.status::text)='READY' THEN 'READY' WHEN upper(o.status::text)='PROCESSING' AND COALESCE(os.status,'RECEIVED')='RECEIVED' THEN 'PROCESSING' ELSE COALESCE(os.status,'RECEIVED') END,
+        'status',CASE WHEN upper(o.status::text) IN ('READY','DELIVERED') THEN 'READY' WHEN upper(o.status::text)='PROCESSING' AND COALESCE(os.status,'RECEIVED')='RECEIVED' THEN 'PROCESSING' ELSE COALESCE(os.status,'RECEIVED') END,
         'ready_at',os.ready_at) ORDER BY oi.id) FILTER(WHERE oi.id IS NOT NULL),'[]'::json) items
      FROM public.orders o
      JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id

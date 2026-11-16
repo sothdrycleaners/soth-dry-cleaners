@@ -604,20 +604,25 @@ export const getRecentOrders = async (req: AuthRequest, res: Response) => {
         o.updated_at,
         c.name as customer_name,
         c.phone as customer_phone,
-        (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count,
+        (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id AND oi.tenant_id = o.tenant_id) as item_count,
         GREATEST(
           o.created_at,
           o.updated_at,
           COALESCE((
-            SELECT MAX(p.payment_date) 
+            SELECT MAX(GREATEST(p.created_at, p.updated_at))
             FROM payments p 
-            WHERE p.order_id = o.id
+            WHERE p.order_id = o.id AND p.tenant_id = o.tenant_id
+          ), o.created_at),
+          COALESCE((
+            SELECT MAX(oi.updated_at)
+            FROM order_items oi
+            WHERE oi.order_id = o.id AND oi.tenant_id = o.tenant_id
           ), o.created_at)
         ) as last_activity
       FROM orders o
-      JOIN customers c ON o.customer_id = c.id
-      WHERE 1=1 ${cancelledFilter} ${branchOrd}
-      ORDER BY last_activity DESC
+      JOIN customers c ON o.customer_id = c.id AND c.tenant_id = o.tenant_id
+      WHERE o.tenant_id = app_current_tenant_id() ${cancelledFilter} ${branchOrd}
+      ORDER BY last_activity DESC, o.id DESC
       LIMIT $1
     `;
 

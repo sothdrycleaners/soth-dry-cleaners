@@ -1045,6 +1045,7 @@ export default function NewOrder() {
       return;
     }
 
+    setAddingCustomer(true);
     if (confirmedName === undefined) {
       try {
         const nameCheck = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
@@ -1056,6 +1057,7 @@ export default function NewOrder() {
         if (matches.some((customer: Customer) => normalizeName(customer.name) === normalizeName(customerName))) {
           setSameQuickNameConfirmValue(customerName);
           setSameQuickNameConfirmOpen(true);
+          setAddingCustomer(false);
           return;
         }
       } catch {
@@ -2597,7 +2599,7 @@ export default function NewOrder() {
               ) : (
                 <UserPlus className="mr-2 h-4 w-4" />
               )}
-              {addingCustomer ? 'Adding...' : 'Add Customer'}
+              {addingCustomer ? 'Checking and adding...' : 'Add Customer'}
             </Button>
           </DialogFooter>
         </DialogContent>

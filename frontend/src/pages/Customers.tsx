@@ -396,6 +396,18 @@ export default function Customers() {
         return;
       }
 
+      const phoneResult = formatCustomerPhone(formData.phone);
+      if (!phoneResult.ok) {
+        toast.error(phoneResult.message);
+        setPhoneHint({ kind: 'country', message: phoneResult.message });
+        return;
+      }
+      if (phoneHint.kind === 'duplicate') {
+        toast.error(phoneHint.message);
+        return;
+      }
+
+      setIsSubmitting(true);
       if (confirmedName === undefined) {
         const nameCheck = await axios.get(`${API_BASE_URL}/customers/check-duplicate`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -412,18 +424,6 @@ export default function Customers() {
         }
       }
 
-      const phoneResult = formatCustomerPhone(formData.phone);
-      if (!phoneResult.ok) {
-        toast.error(phoneResult.message);
-        setPhoneHint({ kind: 'country', message: phoneResult.message });
-        return;
-      }
-      if (phoneHint.kind === 'duplicate') {
-        toast.error(phoneHint.message);
-        return;
-      }
-
-      setIsSubmitting(true);
       await axios.post(
         `${API_BASE_URL}/customers`,
         { ...formData, name: customerName, phone: phoneResult.e164 },
@@ -1080,7 +1080,7 @@ export default function Customers() {
               onClick={handleAddCustomer}
               disabled={isSubmitting || phoneHint.kind === 'country' || phoneHint.kind === 'duplicate'}
             >
-              {isSubmitting ? 'Adding…' : 'Add Customer'}
+              {isSubmitting ? 'Checking and adding…' : 'Add Customer'}
             </Button>
           </DialogFooter>
         </DialogContent>
