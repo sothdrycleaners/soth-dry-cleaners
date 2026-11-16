@@ -3298,7 +3298,6 @@ export default function Orders() {
           {selectedOrder && (
             <div className="space-y-4">
               {(() => {
-                const canRecordPastPayment = isAdmin || user?.role === 'MANAGER' || selectedOrder.is_backdated;
                 const remainingDue = Math.max(
                   0,
                   parseFloat(String(selectedOrder.total_amount)) - parseFloat(String(selectedOrder.amount_paid))
@@ -3337,15 +3336,29 @@ export default function Orders() {
                   className="mt-2"
                   disabled={recordingPayment || remainingDue <= 0}
                 />
-                <Button
-                  variant="link"
-                  size="sm"
-                  onClick={() => setAdditionalPayment(remainingDue)}
-                  className="mt-1"
-                  disabled={recordingPayment || remainingDue <= 0}
-                >
-                  Pay Full Balance
-                </Button>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAdditionalPayment(0);
+                      window.setTimeout(() => document.getElementById('additional-payment')?.focus(), 0);
+                    }}
+                    disabled={recordingPayment || remainingDue <= 0}
+                  >
+                    Partial
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    onClick={() => setAdditionalPayment(remainingDue)}
+                    disabled={recordingPayment || remainingDue <= 0}
+                  >
+                    Pay Full Balance
+                  </Button>
+                </div>
                 {paymentExceedsBalance && (
                   <p className="text-sm text-red-600 mt-1">
                     Amount cannot exceed the remaining balance of {formatUGX(remainingDue)}.
@@ -3358,7 +3371,6 @@ export default function Orders() {
                 <Input
                   id="payment-date"
                   type="date"
-                  min={canRecordPastPayment ? undefined : kampalaTodayYmd()}
                   max={kampalaTodayYmd()}
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
@@ -3367,9 +3379,7 @@ export default function Orders() {
                   required
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  {canRecordPastPayment
-                    ? 'Defaults to today. Choose an earlier date to record a historical payment.'
-                    : 'Defaults to today. Historical payment dates are available for historical orders.'}
+                  Defaults to today. Choose an earlier date to record a past payment.
                 </p>
               </div>
 

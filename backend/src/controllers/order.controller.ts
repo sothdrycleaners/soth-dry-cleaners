@@ -1198,6 +1198,10 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       console.log(`💵 PAID with blank amount — auto-filled full payment UGX ${total_amount.toLocaleString()}`);
     }
 
+    if (finalPaymentMethod !== 'ON_ACCOUNT' && requestedStatus === 'PARTIAL' && finalAmountPaidValue <= 0) {
+      throw new Error('Enter the partial payment amount before creating the order.');
+    }
+
     // Derive payment_status from amounts (source of truth)
     if (finalAmountPaidValue > total_amount) {
       const amountPaidDisplay = finalAmountPaidValue.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });

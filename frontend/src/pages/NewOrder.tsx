@@ -1013,15 +1013,14 @@ export default function NewOrder() {
     }
     // For cash/mm/bt: derive status from amount
     if (amountPaid === 0) {
-      // No amount entered yet with a real payment method — stay UNPAID momentarily
-      // but don't force-switch back to ON_ACCOUNT here (let user finish typing)
-      setPaymentStatus('UNPAID');
+      // Keep a deliberate Partial selection visible until a positive amount is entered.
+      if (paymentStatus !== 'PARTIAL') setPaymentStatus('UNPAID');
     } else if (amountPaid >= total && total > 0) {
       setPaymentStatus('PAID');
     } else {
       setPaymentStatus('PARTIAL');
     }
-  }, [amountPaid, total, paymentMethod]);
+  }, [amountPaid, total, paymentMethod, paymentStatus]);
 
   /**
    * When user types an amount > 0 while ON_ACCOUNT is selected,
@@ -2148,6 +2147,7 @@ export default function NewOrder() {
                         onClick={() => {
                           setPaymentStatus(value);
                           if (value === 'PAID' && total > 0) setAmountPaid(total);
+                          else if (value === 'PARTIAL') setAmountPaid(0);
                         }}
                         className={cn(
                           'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all',
@@ -2284,7 +2284,7 @@ export default function NewOrder() {
               <Button
                 className="w-full h-12 text-base font-bold bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                 onClick={handleCreateOrder}
-                disabled={loading || !selectedCustomer || orderItems.length === 0}
+                disabled={loading || !selectedCustomer || orderItems.length === 0 || (paymentStatus === 'PARTIAL' && amountPaid <= 0)}
               >
                 {loading ? (
                   <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Creating order...</>
