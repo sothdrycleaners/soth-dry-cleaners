@@ -79,13 +79,14 @@ export const getFinancialDashboard = async (req: AuthRequest, res: Response) => 
     expensesDateFilter = andBranchFilter(expensesDateFilter, 'branch_id', branchId);
     const payFrom = paymentsFrom(branchId);
 
-    // Earned revenue is recognized when service delivery is complete.
     const revenueResult = await query(
-      `SELECT 
-        COALESCE(SUM(total_amount - COALESCE(tax_amount, 0)), 0) as total_revenue,
-        COUNT(*) as total_orders
-       FROM orders
-       ${ordersDateFilter ? `${ordersDateFilter} AND` : 'WHERE'} status = 'delivered' AND delivered_at IS NOT NULL`
+      `SELECT COALESCE(SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+                THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END), 0) AS total_revenue,
+              COUNT(DISTINCT o.id) AS total_orders
+       FROM payments p JOIN orders o ON o.id = p.order_id
+       ${paymentsDateFilter ? `${paymentsDateFilter.replace(/payment_date/g, 'p.payment_date')} AND` : 'WHERE'}
+       COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = FALSE
+       ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}`
     );
 
     const expensesResult = await query(
@@ -106,17 +107,19 @@ export const getFinancialDashboard = async (req: AuthRequest, res: Response) => 
        FROM payments p JOIN orders o ON o.id = p.order_id
        ${paymentsDateFilter ? `${paymentsDateFilter} AND` : 'WHERE'}
        COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = TRUE
-       AND o.status = 'delivered' ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}`
+       ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}`
     );
 
+    const netRevenue = Number(revenueResult.rows[0].total_revenue || 0)
+      - Number(refundsResult.rows[0].total_refunds || 0);
     const summaryData = {
-      total_revenue: revenueResult.rows[0].total_revenue,
+      total_revenue: netRevenue,
+      total_refunds: refundsResult.rows[0].total_refunds,
       total_orders: revenueResult.rows[0].total_orders,
       total_expenses: expensesResult.rows[0].total_expenses,
       total_expense_records: expensesResult.rows[0].total_expense_records,
       total_salaries: salariesResult.rows[0].total_salaries,
-      net_profit: parseFloat(revenueResult.rows[0].total_revenue)
-        - parseFloat(refundsResult.rows[0].total_refunds)
+      net_profit: netRevenue
         - parseFloat(expensesResult.rows[0].total_expenses)
         - parseFloat(salariesResult.rows[0].total_salaries),
     };
@@ -124,12 +127,14 @@ export const getFinancialDashboard = async (req: AuthRequest, res: Response) => 
     // Revenue by payment status
     const revenueBreakdownResult = await query(
       `SELECT 
-        payment_status,
-        COUNT(*) as count,
-        COALESCE(SUM(COALESCE(total_amount, total, 0)), 0) as amount
-       FROM orders 
-       ${ordersDateFilter ? `${ordersDateFilter} AND` : 'WHERE'} status <> 'cancelled'
-       GROUP BY payment_status`
+        o.payment_status,
+        COUNT(DISTINCT o.id) as count,
+        COALESCE(SUM(p.amount), 0) as amount
+       FROM payments p JOIN orders o ON o.id = p.order_id
+       ${paymentsDateFilter ? `${paymentsDateFilter.replace(/payment_date/g, 'p.payment_date')} AND` : 'WHERE'}
+       COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = FALSE
+       ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}
+       GROUP BY o.payment_status`
     );
 
     // Top expense categories
@@ -151,17 +156,19 @@ export const getFinancialDashboard = async (req: AuthRequest, res: Response) => 
     // when a day has multiple orders and multiple expenses.
     const trendResult = await query(
       `WITH earned_orders AS (
-         SELECT DATE(o.delivered_at) AS day, COALESCE(SUM(o.total_amount - COALESCE(o.tax_amount, 0)), 0) AS revenue
-         FROM orders o
-         WHERE o.status = 'delivered' AND o.delivered_at IS NOT NULL
+         SELECT DATE(p.payment_date) AS day,
+                COALESCE(SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+                  THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END), 0) AS revenue
+         FROM payments p JOIN orders o ON o.id = p.order_id
+         WHERE COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = FALSE
            ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}
-         GROUP BY DATE(o.delivered_at)
+         GROUP BY DATE(p.payment_date)
        ), refunds AS (
          SELECT DATE(p.payment_date) AS day,
                 COALESCE(SUM(ABS(p.amount) * ((o.total_amount - COALESCE(o.tax_amount, 0)) / NULLIF(o.total_amount, 0))), 0) AS amount
          FROM payments p JOIN orders o ON o.id = p.order_id
          WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
-           AND COALESCE(p.is_refund, FALSE) = TRUE AND o.status = 'delivered'
+           AND COALESCE(p.is_refund, FALSE) = TRUE
            ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}
          GROUP BY DATE(p.payment_date)
        ), expense_totals AS (
@@ -368,13 +375,22 @@ export const getFinancialReport = async (req: AuthRequest, res: Response) => {
     // Revenue sources
     const revenueSourcesResult = await query(
       `SELECT 
-        payment_status,
-        COUNT(*) as order_count,
-        COALESCE(SUM(COALESCE(total_amount, total, 0)), 0) as total_amount,
-        COALESCE(SUM(amount_paid), 0) as amount_paid,
-        COALESCE(SUM(GREATEST(0, COALESCE(total_amount, total, 0) - COALESCE(amount_paid, 0))), 0) as balance
-       FROM orders 
-       WHERE status = 'delivered' AND DATE(delivered_at) BETWEEN $1 AND $2
+        payment_status, COUNT(*) AS order_count,
+        COALESCE(SUM(order_total), 0) AS total_amount,
+        COALESCE(SUM(amount_paid_in_period), 0) AS amount_paid,
+        COALESCE(SUM(balance_at_period_end), 0) AS balance
+       FROM (
+         SELECT o.id, o.payment_status, MAX(COALESCE(o.total_amount, o.total, 0)) AS order_total,
+           SUM(p.amount) FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE) AS amount_paid_in_period,
+           GREATEST(0, MAX(COALESCE(o.total_amount, o.total, 0)) - COALESCE((
+             SELECT SUM(p2.amount) FROM payments p2
+             WHERE p2.order_id = o.id AND COALESCE(p2.is_cancelled, FALSE) = FALSE
+               AND p2.payment_date < ($2::date + INTERVAL '1 day')
+           ), 0)) AS balance_at_period_end
+         FROM payments p JOIN orders o ON o.id = p.order_id
+         WHERE DATE(p.payment_date) BETWEEN $1 AND $2 AND COALESCE(p.is_cancelled, FALSE) = FALSE
+         GROUP BY o.id, o.payment_status
+       ) orders_with_payments
        GROUP BY payment_status`,
       [from_date, to_date]
     );
@@ -384,11 +400,13 @@ export const getFinancialReport = async (req: AuthRequest, res: Response) => {
       `SELECT 
         c.name,
         c.phone,
-        COUNT(o.id) as order_count,
-        COALESCE(SUM(COALESCE(o.total_amount, o.total, 0)), 0) as total_spent
+        COUNT(DISTINCT o.id) as order_count,
+        COALESCE(SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+          THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END), 0) as total_spent
        FROM customers c
        INNER JOIN orders o ON c.id = o.customer_id
-       WHERE o.status = 'delivered' AND DATE(o.delivered_at) BETWEEN $1 AND $2
+       INNER JOIN payments p ON p.order_id = o.id
+       WHERE COALESCE(p.is_cancelled, FALSE) = FALSE AND DATE(p.payment_date) BETWEEN $1 AND $2
        GROUP BY c.id, c.name, c.phone
        ORDER BY total_spent DESC
        LIMIT 10`,
@@ -427,14 +445,16 @@ export const getProfitLossStatement = async (req: AuthRequest, res: Response) =>
     // Revenue section
     const revenueResult = await query(
       `SELECT 
-        COUNT(*) as total_orders,
-        COALESCE(SUM(COALESCE(total_amount, total, 0) - COALESCE(tax_amount, 0)), 0) as gross_revenue,
-        COALESCE(SUM(COALESCE(discount_amount, 0)), 0) as total_discounts,
-        COALESCE(SUM(COALESCE(amount_paid, 0)), 0) as cash_received,
-        COALESCE(SUM(GREATEST(0, COALESCE(total_amount, total, 0) - COALESCE(amount_paid, 0))), 0) as accounts_receivable
-       FROM orders 
-       WHERE status = 'delivered' AND delivered_at IS NOT NULL
-         AND DATE(delivered_at) BETWEEN $1 AND $2`,
+        COUNT(DISTINCT o.id) FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE AND COALESCE(p.is_cancelled, FALSE) = FALSE) as total_orders,
+        COALESCE(SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+          THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END)
+          FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE AND COALESCE(p.is_cancelled, FALSE) = FALSE), 0) as gross_revenue,
+        COALESCE(SUM(COALESCE(o.discount_amount, 0)), 0) as total_discounts,
+        COALESCE(SUM(p.amount) FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE AND COALESCE(p.is_cancelled, FALSE) = FALSE), 0) as cash_received,
+        (SELECT COALESCE(SUM(GREATEST(0, COALESCE(ar.total_amount, ar.total, 0) - COALESCE(ar.amount_paid, 0))), 0)
+         FROM orders ar WHERE ar.status <> 'cancelled' AND ar.payment_status IN ('UNPAID', 'PARTIAL')) as accounts_receivable
+       FROM payments p JOIN orders o ON o.id = p.order_id
+       WHERE DATE(p.payment_date) BETWEEN $1 AND $2`,
       [from_date, to_date]
     );
 
@@ -464,7 +484,7 @@ export const getProfitLossStatement = async (req: AuthRequest, res: Response) =>
       `SELECT COALESCE(SUM(ABS(p.amount) * ((o.total_amount - COALESCE(o.tax_amount, 0)) / NULLIF(o.total_amount, 0))), 0) AS amount
        FROM payments p JOIN orders o ON o.id = p.order_id
        WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
-         AND COALESCE(p.is_refund, FALSE) = TRUE AND o.status = 'delivered'
+         AND COALESCE(p.is_refund, FALSE) = TRUE
          AND DATE(p.payment_date) BETWEEN $1 AND $2`,
       [from_date, to_date]
     );

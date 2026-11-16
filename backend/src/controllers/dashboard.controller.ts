@@ -78,6 +78,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       `SELECT COALESCE(SUM(amount), 0) as order_revenue
        ${payFrom} ${activePaymentDateFilter}`
     );
+    const refundsResult = await query(
+      `SELECT COALESCE(SUM(ABS(p.amount)), 0) AS refunds
+       ${payFrom}
+       ${paymentsDateFilter ? `${paymentsDateFilter.replace(/payment_date/g, 'p.payment_date')} AND` : 'WHERE'}
+       COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = TRUE`
+    );
 
     // Delivery revenue for selected period. Deliveries are a side ledger, so a
     // problem here must not blank the whole dashboard — fall back to zero.
@@ -97,8 +103,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       console.error('⚠️ Delivery revenue unavailable, counting it as 0:', deliveryError);
     }
 
-    const totalRevenue =
-      parseFloat(revenueResult.rows[0].order_revenue) + deliveryRevenue;
+    const totalRevenue = parseFloat(revenueResult.rows[0].order_revenue)
+      + deliveryRevenue - Number(refundsResult.rows[0].refunds || 0);
 
     // Total active customers should follow the selected branch when a branch is in use.
     // Otherwise the dashboard shows a company-wide count even while the other stats are scoped.
@@ -251,9 +257,13 @@ export const getFinancialSummary = async (req: AuthRequest, res: Response) => {
     const params = dateRange ? dateRange : [];
 
     const revenueResult = await query(
-      `SELECT COALESCE(SUM(total_amount - COALESCE(tax_amount, 0)), 0) as total_revenue,
-              COUNT(*) as order_count
-       FROM orders ${ordersWhere} ${branchOrd}`,
+      `SELECT COALESCE(SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+                THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END)
+                FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE AND COALESCE(p.is_cancelled, FALSE) = FALSE), 0) as total_revenue,
+              COUNT(DISTINCT o.id) FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE AND COALESCE(p.is_cancelled, FALSE) = FALSE) as order_count
+       FROM payments p JOIN orders o ON o.id = p.order_id
+       ${dateRange ? `WHERE p.payment_date >= $1 AND p.payment_date <= $2` : 'WHERE TRUE'}
+       ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}`,
       params
     );
 
@@ -262,7 +272,7 @@ export const getFinancialSummary = async (req: AuthRequest, res: Response) => {
        FROM payments p JOIN orders o ON o.id = p.order_id
        ${dateRange ? 'WHERE p.payment_date >= $1 AND p.payment_date <= $2 AND' : 'WHERE'}
        COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = TRUE
-       AND o.status = 'delivered' ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}`,
+       ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}`,
       params
     );
 
@@ -502,10 +512,7 @@ export const getDailyCollections = async (req: AuthRequest, res: Response) => {
 export const getMonthOverMonth = async (req: AuthRequest, res: Response) => {
   try {
     const branchId = resolveListBranchId(req, req.query.branch_id);
-    const branchFilter = branchId ? 'AND branch_id = $1' : '';
-    const values = branchId ? [Number(branchId)] : [];
-    // Compare the same elapsed number of calendar days in each month. Revenue
-    // is recognized when the service is delivered, independent of payment timing.
+    // Compare the same elapsed number of calendar days by payment date.
     const result = await query(
       `WITH period_bounds AS (
          SELECT DATE_TRUNC('month', CURRENT_DATE)::date AS current_start,
@@ -518,16 +525,19 @@ export const getMonthOverMonth = async (req: AuthRequest, res: Response) => {
                 ) AS previous_end
        ), periods AS (
          SELECT
-           COUNT(*) FILTER (WHERE o.delivered_at >= b.current_start AND o.delivered_at < b.current_end) AS current_orders,
-           COALESCE(SUM(o.total_amount - COALESCE(o.tax_amount, 0)) FILTER (WHERE o.delivered_at >= b.current_start AND o.delivered_at < b.current_end), 0) AS current_revenue,
-           COUNT(*) FILTER (WHERE o.delivered_at >= b.previous_start AND o.delivered_at < b.previous_end) AS previous_orders,
-           COALESCE(SUM(o.total_amount - COALESCE(o.tax_amount, 0)) FILTER (WHERE o.delivered_at >= b.previous_start AND o.delivered_at < b.previous_end), 0) AS previous_revenue
-         FROM orders o CROSS JOIN period_bounds b
-         WHERE o.delivered_at IS NOT NULL
-           AND o.status = 'delivered'
-           ${branchFilter}
+           COUNT(DISTINCT p.order_id) FILTER (WHERE p.payment_date >= b.current_start AND p.payment_date < b.current_end AND COALESCE(p.is_refund, FALSE) = FALSE AND COALESCE(p.is_cancelled, FALSE) = FALSE) AS current_orders,
+           COALESCE(SUM(CASE WHEN COALESCE(p.is_refund, FALSE) THEN -ABS(p.amount) ELSE p.amount END
+             * CASE WHEN COALESCE(o.total_amount, 0) > 0 THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END)
+             FILTER (WHERE p.payment_date >= b.current_start AND p.payment_date < b.current_end AND COALESCE(p.is_cancelled, FALSE) = FALSE), 0) AS current_revenue,
+           COUNT(DISTINCT p.order_id) FILTER (WHERE p.payment_date >= b.previous_start AND p.payment_date < b.previous_end AND COALESCE(p.is_refund, FALSE) = FALSE AND COALESCE(p.is_cancelled, FALSE) = FALSE) AS previous_orders,
+           COALESCE(SUM(CASE WHEN COALESCE(p.is_refund, FALSE) THEN -ABS(p.amount) ELSE p.amount END
+             * CASE WHEN COALESCE(o.total_amount, 0) > 0 THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END)
+             FILTER (WHERE p.payment_date >= b.previous_start AND p.payment_date < b.previous_end AND COALESCE(p.is_cancelled, FALSE) = FALSE), 0) AS previous_revenue
+         FROM payments p JOIN orders o ON o.id = p.order_id CROSS JOIN period_bounds b
+         WHERE TRUE
+           ${branchId ? `AND o.branch_id = ${Number(branchId)}` : ''}
        ) SELECT * FROM periods`,
-      values
+      []
     );
 
     const currentRevenue = Number(result.rows[0].current_revenue) || 0;
@@ -545,7 +555,7 @@ export const getMonthOverMonth = async (req: AuthRequest, res: Response) => {
 
     res.json({
       comparison: 'month_to_date',
-      revenue_basis: 'delivered_service_value_excluding_vat',
+      revenue_basis: 'net_cash_payments_by_payment_date_excluding_vat_less_refunds',
       currentMonth: {
         revenue: currentRevenue,
         orders: currentOrders,

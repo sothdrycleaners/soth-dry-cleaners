@@ -3,6 +3,7 @@ import { validationResult } from 'express-validator';
 import { beginTenantTransaction, getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { resolveWriteBranchId, resolveListBranchId } from '../utils/branchScope';
+import { kampalaTodayYmd } from '../utils/businessDate';
 
 function toDateOnly(value: unknown): string | null {
   if (value == null || value === '') return null;
@@ -43,6 +44,7 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
 
     const {
       expense_date,
+      historical_entry = false,
       category,
       description,
       amount,
@@ -52,6 +54,21 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
     } = req.body;
 
     const userId = req.user?.id;
+    const todayYmd = kampalaTodayYmd();
+    const requestedExpenseDate = String(expense_date || todayYmd).slice(0, 10);
+    const isHistoricalEntry = historical_entry === true || historical_entry === 'true';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedExpenseDate) || requestedExpenseDate > todayYmd) {
+      return res.status(400).json({ error: 'Expense date must be a valid date no later than today.' });
+    }
+    if (requestedExpenseDate < todayYmd && !isHistoricalEntry) {
+      return res.status(400).json({ error: 'Enable historical entry to record an expense dated before today.' });
+    }
+    if (isHistoricalEntry && req.user?.role !== 'ADMIN' && req.user?.role !== 'MANAGER') {
+      return res.status(403).json({ error: 'Only administrators and managers can record a historical expense.' });
+    }
+    if (isHistoricalEntry && requestedExpenseDate >= todayYmd) {
+      return res.status(400).json({ error: 'Choose a date earlier than today for a historical expense.' });
+    }
     const branchId = resolveWriteBranchId(req, requestedBranchId);
 
     if (!branchId) {
@@ -84,7 +101,7 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text, $8::text, $9,
          CASE WHEN $8::text = 'APPROVED' THEN NOW() ELSE NULL END, NOW(), $10)
        RETURNING id, expense_date, description, amount, status, approval_status, approved_by, approved_at, branch_id`,
-      [expense_date || new Date(), category, description, amount, payment_method || 'CASH', receipt_number, userId, initialStatus, isAdminEntry ? userId : null, branchId]
+      [requestedExpenseDate, category, description, amount, payment_method || 'CASH', receipt_number, userId, initialStatus, isAdminEntry ? userId : null, branchId]
     );
 
     // Log activity
@@ -324,8 +341,23 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
     }
 
     const body = req.body;
+    const todayYmd = kampalaTodayYmd();
+    const nextExpenseDate = String(body.expense_date !== undefined ? body.expense_date : current.expense_date).slice(0, 10);
+    const historicalEntry = body.historical_entry === true || body.historical_entry === 'true';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextExpenseDate) || nextExpenseDate > todayYmd) {
+      return res.status(400).json({ error: 'Expense date must be a valid date no later than today.' });
+    }
+    if (nextExpenseDate < todayYmd && !historicalEntry) {
+      return res.status(400).json({ error: 'Enable historical entry to use an expense date before today.' });
+    }
+    if (historicalEntry && user.role !== 'ADMIN' && user.role !== 'MANAGER') {
+      return res.status(403).json({ error: 'Only administrators and managers can record a historical expense.' });
+    }
+    if (historicalEntry && nextExpenseDate >= todayYmd) {
+      return res.status(400).json({ error: 'Choose a date earlier than today for a historical expense.' });
+    }
     const values = [
-      body.expense_date !== undefined ? body.expense_date : current.expense_date,
+      nextExpenseDate,
       body.category !== undefined ? body.category : current.category,
       body.description !== undefined ? body.description : current.description,
       body.amount !== undefined ? body.amount : current.amount,

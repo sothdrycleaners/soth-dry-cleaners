@@ -46,6 +46,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import {
   openWhatsAppMessenger,
@@ -169,8 +170,7 @@ const formatDate = (dateString: string | null | undefined) => {
 
 const formatDateTime = (dateString: string) => formatKampalaDateTime(dateString);
 
-const defaultPaymentYmd = (order: { is_backdated?: boolean; created_at?: string }) =>
-  order.is_backdated && order.created_at ? toKampalaYmd(order.created_at) : kampalaTodayYmd();
+const defaultPaymentYmd = () => kampalaTodayYmd();
 
 const getDaysOld = (createdAt: string): string => {
   const diffDays = getKampalaCalendarAge(createdAt);
@@ -667,6 +667,7 @@ export default function Orders() {
   const [recordingPayment, setRecordingPayment] = useState(false);
   const recordingPaymentRef = useRef(false);
   const [paymentDate, setPaymentDate] = useState(kampalaTodayYmd());
+  const [historicalPayment, setHistoricalPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY' | 'BANK_TRANSFER'>('CASH');
   const [mobileMoneyProvider, setMobileMoneyProvider] = useState<'MTN' | 'AIRTEL'>('MTN');
   const [paymentChannel, setPaymentChannel] = useState<'MANUAL' | 'MERCHANT' | 'P2P' | 'DEPOSIT' | 'API_PUSH'>('MANUAL');
@@ -1250,7 +1251,8 @@ export default function Orders() {
         {
           amount: additionalPayment,
           payment_method: finalPaymentMethod,
-          payment_date: paymentDate,
+          historical_payment: historicalPayment,
+          ...(historicalPayment ? { payment_date: paymentDate } : {}),
           transaction_reference: transactionReference || null,
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -1278,6 +1280,7 @@ export default function Orders() {
       setSenderPhone('');
       setTransactionReference('');
       setPaymentDate(kampalaTodayYmd());
+      setHistoricalPayment(false);
       fetchOrders();
       if (selectedOrder) viewOrderDetails(selectedOrder);
     } catch (error) {
@@ -2476,7 +2479,8 @@ export default function Orders() {
                       const remaining = Math.max(0, totalAmt - paidAmt);
                       setAdditionalPayment(remaining > 0 ? remaining : totalAmt);
                       setPaymentMethod('CASH');
-                      setPaymentDate(defaultPaymentYmd(selectedOrder));
+                      setPaymentDate(defaultPaymentYmd());
+                      setHistoricalPayment(false);
                       setShowPaymentDialog(true);
                     }}
                   >
@@ -2896,7 +2900,8 @@ export default function Orders() {
                           ? remaining
                           : parseFloat(String(selectedOrder.total_amount)) || 0
                       );
-                      setPaymentDate(defaultPaymentYmd(selectedOrder));
+                      setPaymentDate(defaultPaymentYmd());
+                      setHistoricalPayment(false);
                       setShowPaymentDialog(true);
                     }}
                     variant="default"
@@ -3088,15 +3093,28 @@ export default function Orders() {
               </div>
 
               <div>
-                <Label htmlFor="payment-date">Payment Date</Label>
+                {(isAdmin || user?.role === 'MANAGER') && <div className="flex items-center gap-2">
+                  <Checkbox id="historical-payment" checked={historicalPayment} onCheckedChange={(checked) => {
+                    const enabled = Boolean(checked);
+                    setHistoricalPayment(enabled);
+                    if (!enabled) setPaymentDate(kampalaTodayYmd());
+                    else {
+                      const previousDay = new Date();
+                      previousDay.setDate(previousDay.getDate() - 1);
+                      setPaymentDate(`${previousDay.getFullYear()}-${String(previousDay.getMonth() + 1).padStart(2, '0')}-${String(previousDay.getDate()).padStart(2, '0')}`);
+                    }
+                  }} disabled={recordingPayment} />
+                  <Label htmlFor="historical-payment">Record a historical payment</Label>
+                </div>}
+                <Label htmlFor="payment-date">{historicalPayment ? 'Date payment was received' : 'Payment date: today'}</Label>
                 <Input
                   id="payment-date"
                   type="date"
                   max={kampalaTodayYmd()}
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
-                  className="mt-2"
-                  disabled={recordingPayment}
+                  className={historicalPayment ? 'mt-2' : 'hidden'}
+                  disabled={recordingPayment || !historicalPayment}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   {selectedOrder.is_backdated

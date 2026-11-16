@@ -46,8 +46,12 @@ async function listOrders(req: AuthRequest, delivered = false) {
   if (search) { values.push(`%${search}%`); where += ` AND (o.order_number ILIKE $${values.length} OR c.name ILIKE $${values.length} OR b.name ILIKE $${values.length})`; }
   const status = String(req.query.status || '');
   if (status && status !== 'ALL' && status !== 'EXPRESS' && !delivered) {
-    values.push(status);
-    where += ` AND EXISTS(SELECT 1 FROM public.operations_item_status fs WHERE fs.tenant_id=o.tenant_id AND fs.order_id=o.id AND fs.status=$${values.length})`;
+    if (status === 'RECEIVED') {
+      where += " AND upper(COALESCE(o.status::text,'PENDING')) IN ('PENDING','RECEIVED')";
+    } else if (['PROCESSING', 'READY'].includes(status)) {
+      values.push(status);
+      where += ` AND upper(o.status::text)=$${values.length}`;
+    }
   }
   if (status === 'EXPRESS') where += " AND EXISTS(SELECT 1 FROM public.order_items ex WHERE ex.order_id=o.id AND ex.tenant_id=o.tenant_id AND upper(COALESCE(ex.service_type,''))='EXPRESS')";
   const count = await query(
@@ -61,7 +65,8 @@ async function listOrders(req: AuthRequest, delivered = false) {
       COALESCE(o.recorded_at,o.created_at) received_at,o.due_date,
       c.name customer_name,c.customer_id customer_number,u.full_name recorded_by,
       COALESCE(json_agg(json_build_object('id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,'service_type',oi.service_type,'express_due_at',oi.express_due_at,
-        'status',COALESCE(os.status,'RECEIVED'),'ready_at',os.ready_at) ORDER BY oi.id) FILTER(WHERE oi.id IS NOT NULL),'[]'::json) items
+        'status',CASE WHEN upper(o.status::text)='READY' THEN 'READY' WHEN upper(o.status::text)='PROCESSING' AND COALESCE(os.status,'RECEIVED')='RECEIVED' THEN 'PROCESSING' ELSE COALESCE(os.status,'RECEIVED') END,
+        'ready_at',os.ready_at) ORDER BY oi.id) FILTER(WHERE oi.id IS NOT NULL),'[]'::json) items
      FROM public.orders o
      JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
      LEFT JOIN public.branches b ON b.id=o.branch_id
@@ -88,9 +93,9 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
     if (branch !== null) { values.push(branch); branchClause = ' AND o.branch_id=$1'; }
     const totals = await query(
       "SELECT COUNT(DISTINCT o.id)::int active_orders," +
-      "COUNT(oi.id) FILTER(WHERE os.status='RECEIVED')::int received," +
-      "COUNT(oi.id) FILTER(WHERE os.status='PROCESSING')::int processing," +
-      "COUNT(oi.id) FILTER(WHERE os.status='READY')::int ready " +
+      "COUNT(DISTINCT o.id) FILTER(WHERE upper(COALESCE(o.status::text,'PENDING')) IN ('PENDING','RECEIVED'))::int received," +
+      "COUNT(DISTINCT o.id) FILTER(WHERE upper(o.status::text)='PROCESSING')::int processing," +
+      "COUNT(DISTINCT o.id) FILTER(WHERE upper(o.status::text)='READY')::int ready " +
       "FROM public.orders o LEFT JOIN public.order_items oi ON oi.order_id=o.id AND oi.tenant_id=o.tenant_id " +
       "LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id " +
       "WHERE upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')" + branchClause,
@@ -99,7 +104,7 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
     const result = await listOrders(req);
     const row = totals.rows[0] || {};
     res.json({
-      item_counts: { received: Number(row.received || 0), processing: Number(row.processing || 0), ready: Number(row.ready || 0) },
+      order_counts: { received: Number(row.received || 0), processing: Number(row.processing || 0), ready: Number(row.ready || 0) },
       total_active_orders: Number(row.active_orders || 0),
       express_orders: result.orders.filter((o: any) => o.is_express).slice(0, 8)
     });
@@ -178,6 +183,56 @@ export const updateOperationsItem = async (req: AuthRequest, res: Response) => {
     res.json({ success: true, order_ready: ready });
   } catch (error) { try { await client.query('ROLLBACK'); } catch {} console.error('Operations item update error:', error); res.status(500).json({ error: 'Unable to update item status' }); }
   finally { client.release(); }
+};
+
+export const markOperationsOrderReady = async (req: AuthRequest, res: Response) => {
+  const orderId = Number(req.params.orderId);
+  if (!Number.isSafeInteger(orderId) || orderId < 1) return res.status(400).json({ error: 'Valid order is required' });
+  const client = await getClient();
+  try {
+    await beginTenantTransaction(client);
+    const found = await client.query(
+      `SELECT id,status,branch_id FROM public.orders WHERE id=$1 AND tenant_id=app_current_tenant_id() FOR UPDATE`,
+      [orderId]
+    );
+    if (!found.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Order not found' }); }
+    const currentStatus = String(found.rows[0].status || '').toUpperCase();
+    if (['DELIVERED', 'CANCELLED'].includes(currentStatus)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Delivered or cancelled orders cannot be changed in Operations' });
+    }
+    const branchFilter = branchIdFor(req);
+    if (branchFilter !== null && Number(found.rows[0].branch_id) !== branchFilter) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'You cannot update this branch order' });
+    }
+
+    await client.query("SELECT set_config('app.operations_status_update','true',true)");
+    const itemResult = await client.query(
+      `INSERT INTO public.operations_item_status AS existing(tenant_id,order_id,order_item_id,status,ready_at,updated_by,updated_at)
+       SELECT oi.tenant_id,oi.order_id,oi.id,'READY',NOW(),$2,NOW()
+       FROM public.order_items oi WHERE oi.order_id=$1 AND oi.tenant_id=app_current_tenant_id()
+       ON CONFLICT(tenant_id,order_item_id) DO UPDATE
+         SET status='READY',ready_at=COALESCE(existing.ready_at,NOW()),updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
+      [orderId, req.user!.id]
+    );
+    if (itemResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This order has no items to mark ready' });
+    }
+    await client.query(
+      `UPDATE public.orders SET status='READY',updated_at=NOW() WHERE id=$1 AND tenant_id=app_current_tenant_id()`,
+      [orderId]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, order_ready: true });
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('Operations order ready error:', error);
+    res.status(500).json({ error: 'Unable to mark order ready' });
+  } finally {
+    client.release();
+  }
 };
 export const updateOperationsItemNote = async (req: AuthRequest, res: Response) => {
   const itemId = Number(req.params.itemId), note = String(req.body.note || '').trim();

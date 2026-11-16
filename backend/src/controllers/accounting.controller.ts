@@ -86,30 +86,39 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
     // Revenue (from payments table — cash actually received)
     // is_refund may be missing on older DBs; COALESCE treats NULL as not-refund
     const revenueResult = await query(`
-      SELECT COALESCE(SUM(o.total_amount - COALESCE(o.tax_amount, 0)), 0) AS earned_revenue, COUNT(*) AS total_orders
-      FROM orders o
-      ${appendFilter(dateFilter, "o.status = 'delivered' AND o.delivered_at IS NOT NULL")}
+      SELECT
+        COALESCE(SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+          THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END), 0) AS earned_revenue,
+        COUNT(DISTINCT o.id) AS total_orders
+      FROM payments p JOIN orders o ON p.order_id = o.id
+      ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = FALSE')}
     `);
     const cashActivityResult = await query(`
       SELECT
         COALESCE(SUM(p.amount) FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE), 0) AS total_payments,
-        COALESCE(SUM(ABS(p.amount) * ((o.total_amount - COALESCE(o.tax_amount, 0)) / NULLIF(o.total_amount, 0))) FILTER (WHERE COALESCE(p.is_refund, FALSE) = TRUE AND o.delivered_at IS NOT NULL), 0) AS total_refunds,
-      COUNT(*) FILTER (WHERE COALESCE(p.is_refund, FALSE) = TRUE AND o.delivered_at IS NOT NULL) AS refund_count
+        COALESCE(SUM(ABS(p.amount) * CASE WHEN COALESCE(o.total_amount, 0) > 0 THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END) FILTER (WHERE COALESCE(p.is_refund, FALSE) = TRUE), 0) AS total_refunds,
+      COUNT(*) FILTER (WHERE COALESCE(p.is_refund, FALSE) = TRUE) AS refund_count
       FROM payments p JOIN orders o ON p.order_id = o.id
       ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE')}
     `);
 
     // Revenue by service category (only counting actual payments, not refunds)
     const revenueByCategoryResult = await query(`
-      SELECT 
-        pi.category,
-        ROUND(COALESCE(SUM(oi.total_price), 0)) as revenue,
-        COUNT(DISTINCT o.id) as order_count
-      FROM orders o
-      JOIN order_items oi ON o.id = oi.order_id
-      JOIN price_items pi ON oi.price_item_id = pi.id
-      ${appendFilter(dateFilter, "o.status = 'delivered' AND o.delivered_at IS NOT NULL")}
-      GROUP BY pi.category
+      WITH paid_lines AS (
+        SELECT pi.category, o.id AS order_id,
+          p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+            THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END AS net_payment,
+          oi.total_price / NULLIF(SUM(oi.total_price) OVER (PARTITION BY p.id), 0) AS line_share
+        FROM payments p
+        JOIN orders o ON p.order_id = o.id
+        JOIN order_items oi ON o.id = oi.order_id
+        JOIN price_items pi ON oi.price_item_id = pi.id
+        ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE')}
+      )
+      SELECT category, ROUND(COALESCE(SUM(net_payment * line_share), 0)) AS revenue,
+             COUNT(DISTINCT order_id) AS order_count
+      FROM paid_lines
+      GROUP BY category
       ORDER BY revenue DESC
     `);
 
@@ -182,7 +191,7 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
 
     res.json({
       period: period || `${from_date} to ${to_date}`,
-      revenue_basis: 'delivered_service_value_excluding_vat_less_refunds',
+      revenue_basis: 'net_cash_payments_by_payment_date_excluding_vat_less_refunds',
       cost_of_goods_sold_basis: 'not_separately_tracked',
       revenue: {
         total: netRevenue, // UI + exports expect revenue.total
@@ -232,13 +241,16 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
     // ASSETS
     // 2. Accounts Receivable (outstanding customer balances)
     const accountsReceivableResult = await query(`
-      SELECT COALESCE(SUM(
-        GREATEST(0, COALESCE(total_amount, total, 0) - COALESCE(amount_paid, 0))
-      ), 0) as accounts_receivable
-      FROM orders
-      WHERE status = 'delivered'
-        AND payment_status IN ('UNPAID', 'PARTIAL')
-        AND delivered_at < ($1::date + INTERVAL '1 day')
+      SELECT COALESCE(SUM(GREATEST(0,
+        COALESCE(o.total_amount, o.total, 0) - COALESCE((
+          SELECT SUM(p.amount)
+          FROM payments p
+          WHERE p.order_id = o.id AND COALESCE(p.is_cancelled, FALSE) = FALSE
+            AND p.payment_date < ($1::date + INTERVAL '1 day')
+        ), 0)
+      )), 0) as accounts_receivable
+      FROM orders o
+      WHERE o.delivered_at < ($1::date + INTERVAL '1 day')
     `, [as_of_date]);
 
     // 3. Inventory value (current stock)
@@ -247,7 +259,24 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
       FROM inventory_items
     `);
 
-    const totalAssets =
+    // Cash is estimated from the recorded money movements. An opening bank
+    // balance is not available in the operational ledger, so this is net
+    // movement since tracking began rather than a bank reconciliation.
+    const cashBalanceResult = await query(`
+      SELECT
+        COALESCE((SELECT SUM(p.amount) FROM payments p
+          WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
+            AND p.payment_date < ($1::date + INTERVAL '1 day')), 0)
+        - COALESCE((SELECT SUM(e.amount) FROM expenses e
+          WHERE e.expense_date <= $1
+            AND COALESCE(e.status, e.approval_status) = 'APPROVED'
+            AND COALESCE(e.category, '') <> 'Salaries'), 0)
+        - COALESCE((SELECT SUM(sp.net_amount) FROM salary_payments sp
+          WHERE sp.payment_date <= $1 AND sp.payment_status = 'PAID'), 0) AS cash_balance
+    `, [as_of_date]);
+
+    const cashBalance = Number(cashBalanceResult.rows[0].cash_balance) || 0;
+    const totalAssets = cashBalance +
       parseFloat(accountsReceivableResult.rows[0].accounts_receivable) +
       parseFloat(inventoryResult.rows[0].inventory_value);
 
@@ -258,9 +287,14 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
     const totalLiabilities = 0;
 
     const customerAdvancesResult = await query(`
-      SELECT COALESCE(SUM(GREATEST(0, COALESCE(o.amount_paid, 0))), 0) AS customer_advances
+      SELECT COALESCE(SUM(GREATEST(0, COALESCE((
+        SELECT SUM(p.amount) FROM payments p
+        WHERE p.order_id = o.id AND COALESCE(p.is_cancelled, FALSE) = FALSE
+          AND p.payment_date < ($1::date + INTERVAL '1 day')
+      ), 0))), 0) AS customer_advances
       FROM orders o
-      WHERE o.status NOT IN ('delivered', 'cancelled')
+      WHERE (o.delivered_at IS NULL OR o.delivered_at >= ($1::date + INTERVAL '1 day'))
+        AND o.status <> 'cancelled'
         AND o.created_at < ($1::date + INTERVAL '1 day')
     `, [as_of_date]);
     const customerAdvances = Number(customerAdvancesResult.rows[0].customer_advances) || 0;
@@ -271,10 +305,10 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
     res.json({
       as_of_date,
       equity_basis: 'derived_residual',
-      note: 'Partial operational snapshot: opening cash, accounts payable, unpaid payroll, owner capital, and opening balances are not tracked. Approved expenses are treated as paid on their expense date. Inventory is current rather than historical. Equity is a derived residual, not a posted ledger balance.',
+      note: 'Partial operational snapshot: cash is the net movement recorded since tracking began because opening bank balances are not entered. Accounts payable, unpaid payroll, owner capital, and opening balances are not tracked. Approved expenses are treated as paid on their expense date. Inventory is current rather than historical. Equity is a derived residual, not a posted ledger balance.',
       assets: {
         current_assets: {
-          cash: null,
+          cash: cashBalance,
           accounts_receivable: parseFloat(accountsReceivableResult.rows[0].accounts_receivable),
           inventory: parseFloat(inventoryResult.rows[0].inventory_value),
           total: totalAssets,
@@ -441,11 +475,17 @@ export const getTrialBalance = async (req: AuthRequest, res: Response) => {
   try {
     const { as_of_date = new Date().toISOString().split('T')[0] } = req.query;
 
-    // Revenue (Credit), recognized on delivery.
+    // Revenue reflects payments received up to the requested date, net of VAT.
     const revenueResult = await query(`
-      SELECT COALESCE(SUM(total_amount - COALESCE(tax_amount, 0)), 0) as balance
-      FROM orders
-      WHERE status = 'delivered' AND delivered_at IS NOT NULL AND delivered_at < ($1::date + INTERVAL '1 day')
+      SELECT COALESCE(SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+        THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END)
+        FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE), 0)
+        - COALESCE(SUM(ABS(p.amount) * CASE WHEN COALESCE(o.total_amount, 0) > 0
+          THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END)
+          FILTER (WHERE COALESCE(p.is_refund, FALSE) = TRUE), 0) as balance
+      FROM payments p JOIN orders o ON o.id = p.order_id
+      WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
+        AND p.payment_date < ($1::date + INTERVAL '1 day')
     `, [as_of_date]);
 
     // Expenses (Debit)
@@ -456,6 +496,7 @@ export const getTrialBalance = async (req: AuthRequest, res: Response) => {
       FROM expenses
       WHERE expense_date <= $1
         AND COALESCE(status, approval_status) = 'APPROVED'
+        AND COALESCE(category, '') <> 'Salaries'
       GROUP BY category
     `, [as_of_date]);
 
@@ -467,29 +508,33 @@ export const getTrialBalance = async (req: AuthRequest, res: Response) => {
         AND payment_status = 'PAID'
     `, [as_of_date]);
 
-    // Cash (Debit)
+    // Cash is the net movement from receipts after approved operating costs
+    // and paid payroll, all evaluated by their recorded transaction dates.
     const cashResult = await query(`
-      SELECT COALESCE(SUM(p.amount), 0) as balance
-      FROM payments p
+      SELECT
+        COALESCE((SELECT SUM(p.amount) FROM payments p
+          WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
+            AND p.payment_date < ($1::date + INTERVAL '1 day')), 0)
+        - COALESCE((SELECT SUM(e.amount) FROM expenses e
+          WHERE e.expense_date <= $1 AND COALESCE(e.status, e.approval_status) = 'APPROVED'
+            AND COALESCE(e.category, '') <> 'Salaries'), 0)
+        - COALESCE((SELECT SUM(sp.net_amount) FROM salary_payments sp
+          WHERE sp.payment_date <= $1 AND sp.payment_status = 'PAID'), 0) AS balance
+    `, [as_of_date]);
+
+    const grossReceiptsResult = await query(`
+      SELECT COALESCE(SUM(p.amount), 0) AS balance FROM payments p
       WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
         AND p.payment_date < ($1::date + INTERVAL '1 day')
     `, [as_of_date]);
 
-    // Accounts Receivable (Debit)
-    const arResult = await query(`
-      SELECT COALESCE(SUM(
-        GREATEST(0, COALESCE(total_amount, total, 0) - COALESCE(amount_paid, 0))
-      ), 0) as balance
-      FROM orders
-      WHERE status = 'delivered'
-        AND payment_status IN ('UNPAID', 'PARTIAL')
-        AND delivered_at < ($1::date + INTERVAL '1 day')
-    `, [as_of_date]);
-
+    const cashMovement = Number(cashResult.rows[0].balance) || 0;
+    const netRevenueBalance = Number(revenueResult.rows[0].balance) || 0;
+    const vatBalance = (Number(grossReceiptsResult.rows[0].balance) || 0) - netRevenueBalance;
     const accounts = [
-      { account_code: '1100', account_name: 'Cash', debit: parseFloat(cashResult.rows[0].balance), credit: 0 },
-      { account_code: '1200', account_name: 'Accounts Receivable', debit: parseFloat(arResult.rows[0].balance), credit: 0 },
-      { account_code: '4000', account_name: 'Revenue - Laundry Services', debit: 0, credit: parseFloat(revenueResult.rows[0].balance) },
+      { account_code: '1100', account_name: 'Cash / net cash movement', debit: Math.max(0, cashMovement), credit: Math.max(0, -cashMovement) },
+      { account_code: '4000', account_name: 'Revenue - Laundry Services', debit: 0, credit: netRevenueBalance },
+      { account_code: '2100', account_name: vatBalance >= 0 ? 'VAT collected (payable)' : 'VAT adjustment (receivable)', debit: Math.max(0, -vatBalance), credit: Math.max(0, vatBalance) },
     ];
 
     // Add expenses by category
@@ -518,7 +563,7 @@ export const getTrialBalance = async (req: AuthRequest, res: Response) => {
     res.json({
       as_of_date,
       accounting_basis: 'operational_subledger_summary',
-      note: 'This is a reconstructed summary, not a complete double-entry trial balance. Opening balances, owner capital, and expense settlement entries are not fully recorded.',
+      note: 'Cash-basis summary of payment ledger receipts, VAT, approved expenses, and paid payroll by their recorded dates. Opening balances, inventory valuation, owner capital, and non-cash journal entries are not tracked.',
       accounts,
       totals: {
         total_debits: totalDebits,
@@ -756,14 +801,17 @@ export const getBranchSummary = async (req: AuthRequest, res: Response) => {
         b.name AS branch_name,
         b.code AS branch_code,
         COALESCE((
-          SELECT SUM(o.total_amount - COALESCE(o.tax_amount, 0))
-          FROM orders o
-          WHERE o.branch_id = b.id AND o.status = 'delivered'
-            AND o.delivered_at IS NOT NULL AND ${orderDateSql}
+          SELECT SUM(p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+            THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END)
+          FROM payments p JOIN orders o ON o.id = p.order_id
+          WHERE o.branch_id = b.id
+            AND COALESCE(p.is_cancelled, FALSE) = FALSE
+            AND COALESCE(p.is_refund, FALSE) = FALSE
+            AND ${paymentDateSql}
         ), 0) - COALESCE((
           SELECT SUM(ABS(p.amount) * ((o.total_amount - COALESCE(o.tax_amount, 0)) / NULLIF(o.total_amount, 0)))
           FROM payments p JOIN orders o ON o.id = p.order_id
-          WHERE o.branch_id = b.id AND o.status = 'delivered'
+          WHERE o.branch_id = b.id
             AND COALESCE(p.is_cancelled, FALSE) = FALSE
             AND COALESCE(p.is_refund, FALSE) = TRUE
             AND ${paymentDateSql}
@@ -783,11 +831,12 @@ export const getBranchSummary = async (req: AuthRequest, res: Response) => {
             AND ${paymentDateSql.replace(/p\.payment_date/g, 'sp.payment_date')}
         ), 0) AS salaries,
         COALESCE((
-          SELECT COUNT(*)
-          FROM orders o
+          SELECT COUNT(DISTINCT p.order_id)
+          FROM payments p JOIN orders o ON o.id = p.order_id
           WHERE o.branch_id = b.id
-            AND o.status = 'delivered' AND o.delivered_at IS NOT NULL
-            AND ${orderDateSql}
+            AND COALESCE(p.is_cancelled, FALSE) = FALSE
+            AND COALESCE(p.is_refund, FALSE) = FALSE
+            AND ${paymentDateSql}
         ), 0) AS order_count
       FROM branches b
       ORDER BY b.name ASC

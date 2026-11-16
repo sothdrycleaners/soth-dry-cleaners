@@ -931,6 +931,7 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
       amount,
       payment_method,
       payment_date,
+      historical_payment = false,
       transaction_reference,
       notes,
     } = req.body || {};
@@ -998,10 +999,18 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const paymentYmd =
-      extractYmd(payment_date) ||
-      (order.is_backdated ? extractYmd(order.created_at) : null) ||
-      kampalaTodayYmd();
+    const todayYmd = kampalaTodayYmd();
+    const requestedPaymentYmd = extractYmd(payment_date);
+    const isHistoricalPayment = historical_payment === true || historical_payment === 'true';
+    if (isHistoricalPayment && req.user?.role !== 'ADMIN' && req.user?.role !== 'MANAGER') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Only administrators and managers can record a historical payment.' });
+    }
+    if (isHistoricalPayment && (!requestedPaymentYmd || requestedPaymentYmd >= todayYmd)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Choose a payment date earlier than today for a historical payment.' });
+    }
+    const paymentYmd = isHistoricalPayment ? requestedPaymentYmd! : todayYmd;
 
     const inserted = await client.query(
       `INSERT INTO payments (

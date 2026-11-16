@@ -480,6 +480,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       payment_method = 'CASH',
       amount_paid = 0,
       transaction_reference,
+      historical_payment = false,
       pickup_date, 
       notes,
       branch_id: requestedBranchId,
@@ -1043,10 +1044,16 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     
     // Always create a payments ledger row when money was received (links order ↔ Payments ↔ accounting)
     if (finalAmountPaidValue > 0 && finalPaymentMethod !== 'ON_ACCOUNT') {
-      const paymentYmd =
-        extractYmd(requestedCreatePaymentDate) ||
-        extractYmd(customOrderDate) ||
-        kampalaTodayYmd();
+      const todayYmd = kampalaTodayYmd();
+      const requestedPaymentYmd = extractYmd(requestedCreatePaymentDate);
+      const isHistoricalPayment = historical_payment === true || historical_payment === 'true';
+      if (isHistoricalPayment && req.user!.role !== 'ADMIN' && req.user!.role !== 'MANAGER') {
+        throw new Error('Only administrators and managers can record a historical payment.');
+      }
+      if (isHistoricalPayment && (!requestedPaymentYmd || requestedPaymentYmd >= todayYmd)) {
+        throw new Error('Choose a payment date earlier than today for a historical payment.');
+      }
+      const paymentYmd = isHistoricalPayment ? requestedPaymentYmd! : todayYmd;
       await client.query(
         `INSERT INTO payments (
           order_id,
@@ -1346,6 +1353,7 @@ export const updateOrder = async (req: AuthRequest, res: Response) => {
       notes,
       transaction_reference,
       payment_date: requestedPaymentDate,
+      historical_payment = false,
     } = req.body;
 
     // Cancelling is an administrator action. This generic update route must not
@@ -1392,6 +1400,17 @@ export const updateOrder = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Order not found' });
     }
     const currentOrder = currentOrderResult.rows[0];
+
+    if (parsedAmountPaid !== undefined && parsedAmountPaid > currentOrder.amount_paid
+      && (historical_payment === true || historical_payment === 'true')) {
+      if (req.user!.role !== 'ADMIN' && req.user!.role !== 'MANAGER') {
+        return res.status(403).json({ error: 'Only administrators and managers can record a historical payment.' });
+      }
+      const historicalYmd = extractYmd(requestedPaymentDate);
+      if (!historicalYmd || historicalYmd >= kampalaTodayYmd()) {
+        return res.status(400).json({ error: 'Choose a payment date earlier than today for a historical payment.' });
+      }
+    }
 
     if (forbiddenIfOutsideBranch(req, res, currentOrder.branch_id)) {
       return;
@@ -1517,10 +1536,16 @@ export const updateOrder = async (req: AuthRequest, res: Response) => {
       const userId = req.user?.id;
 
       try {
-        const paymentYmd =
-          extractYmd(requestedPaymentDate) ||
-          (currentOrder.is_backdated ? extractYmd(currentOrder.created_at) : null) ||
-          kampalaTodayYmd();
+        const todayYmd = kampalaTodayYmd();
+        const requestedPaymentYmd = extractYmd(requestedPaymentDate);
+        const isHistoricalPayment = historical_payment === true || historical_payment === 'true';
+        if (isHistoricalPayment && req.user!.role !== 'ADMIN' && req.user!.role !== 'MANAGER') {
+          throw new Error('Only administrators and managers can record a historical payment.');
+        }
+        if (isHistoricalPayment && (!requestedPaymentYmd || requestedPaymentYmd >= todayYmd)) {
+          throw new Error('Choose a payment date earlier than today for a historical payment.');
+        }
+        const paymentYmd = isHistoricalPayment ? requestedPaymentYmd! : todayYmd;
 
         await query(`
           INSERT INTO payments (

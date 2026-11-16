@@ -36,5 +36,6 @@ router.get('/delivered', controller.getOperationsDelivered as any);
 router.get('/messages', controller.getOperationsMessages as any);
 router.post('/messages', controller.sendOperationsMessage as any);
 router.put('/items/:itemId/status', controller.updateOperationsItem as any);
+router.put('/orders/:orderId/ready', controller.markOperationsOrderReady as any);
 router.put('/items/:itemId/note', controller.updateOperationsItemNote as any);
 export default router;

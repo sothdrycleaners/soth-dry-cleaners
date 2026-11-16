@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -184,6 +185,7 @@ const Expenses = () => {
 
   const [formData, setFormData] = useState({
     expense_date: getLocalDateString(),
+    historical_entry: false,
     category: '',
     description: '',
     amount: '',
@@ -386,7 +388,7 @@ const Expenses = () => {
       setShowDetailsDialog(false);
       setSelectedExpense(null);
       setEditingExpense(null);
-      setFormData({ expense_date: getLocalDateString(), category: '', description: '', amount: '', payment_method: 'CASH', receipt_number: '', branch_id: defaultExpenseBranchId() });
+      setFormData({ expense_date: getLocalDateString(), historical_entry: false, category: '', description: '', amount: '', payment_method: 'CASH', receipt_number: '', branch_id: defaultExpenseBranchId() });
       await Promise.all([fetchExpenses(), fetchMonthlyStats()]);
     } catch (error: unknown) {
       console.error(editingExpense ? 'Failed to update expense:' : 'Failed to record expense:', error);
@@ -414,6 +416,7 @@ const Expenses = () => {
     setEditingExpense(expense);
     setFormData({
       expense_date: String(expense.expense_date || '').slice(0, 10),
+      historical_entry: String(expense.expense_date || '').slice(0, 10) < getLocalDateString(),
       category: expense.category_name,
       description: expense.description,
       amount: String(expense.amount),
@@ -635,7 +638,7 @@ const Expenses = () => {
           <Button
             onClick={() => {
             setEditingExpense(null);
-            setFormData({ expense_date: getLocalDateString(), category: '', description: '', amount: '', payment_method: 'CASH', receipt_number: '', branch_id: user?.branch_id ? String(user.branch_id) : '' });
+            setFormData({ expense_date: getLocalDateString(), historical_entry: false, category: '', description: '', amount: '', payment_method: 'CASH', receipt_number: '', branch_id: user?.branch_id ? String(user.branch_id) : '' });
             setShowAddDialog(true);
           }}
           className="gap-2 w-full sm:w-auto"
@@ -968,14 +971,19 @@ const Expenses = () => {
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
               <div>
-                <Label htmlFor="expense_date">Expense Date *</Label>
-                <Input
-                  id="expense_date"
-                  type="date"
-                  value={formData.expense_date}
-                  onChange={(e) => setFormData({ ...formData, expense_date: e.target.value })}
-                  required
-                />
+                {(isAdmin || isManager) && <div className="mb-2 flex items-center gap-2">
+                  <Checkbox id="historical-expense" checked={formData.historical_entry}
+                    onCheckedChange={(checked) => {
+                      const enabled = Boolean(checked);
+                      setFormData({ ...formData, historical_entry: enabled,
+                        expense_date: enabled ? (() => { const d = new Date(); d.setDate(d.getDate() - 1); return getLocalDateString(d); })() : getLocalDateString() });
+                    }} />
+                  <Label htmlFor="historical-expense">Record a historical expense</Label>
+                </div>}
+                <Label htmlFor="expense_date">{formData.historical_entry ? 'Expense Date *' : 'Expense Date (today)'}</Label>
+                {formData.historical_entry ? <Input id="expense_date" type="date" max={getLocalDateString()}
+                  value={formData.expense_date} onChange={(e) => setFormData({ ...formData, expense_date: e.target.value })} required />
+                  : <p className="mt-2 text-sm text-muted-foreground">{getLocalDateString()}</p>}
               </div>
               {canChooseBranch && branches.length > 0 && !editingExpense && (
                 <div>

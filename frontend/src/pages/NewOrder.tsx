@@ -249,6 +249,8 @@ export default function NewOrder() {
   const [expressDeadlineTime, setExpressDeadlineTime] = useState('');
   const [useBackdate, setUseBackdate] = useState(false);
   const [orderDate, setOrderDate] = useState(kampalaTodayYmd());
+  const [historicalPayment, setHistoricalPayment] = useState(false);
+  const [historicalPaymentDate, setHistoricalPaymentDate] = useState(kampalaTodayYmd());
   /** Per-item adjustment mode: 'bargain' = reduce price, 'priceup' = increase price */
   const [itemAdjModes, setItemAdjModes] = useState<Record<number, 'bargain' | 'priceup'>>({});
   const getItemAdjMode = (index: number) => itemAdjModes[index] ?? 'bargain';
@@ -1101,6 +1103,8 @@ export default function NewOrder() {
     setItemSearch('');
     setUseBackdate(false);
     setOrderDate(kampalaTodayYmd());
+    setHistoricalPayment(false);
+    setHistoricalPaymentDate(kampalaTodayYmd());
   };
 
   const sendOrderViaWhatsApp = (phone: string, message: string) => {
@@ -1193,7 +1197,9 @@ export default function NewOrder() {
         transaction_reference: transactionRef || null,
         notes,
         branch_id: selectedBranchId ? Number(selectedBranchId) : undefined,
-        ...(canBackdate && useBackdate ? { order_date: orderDate, payment_date: orderDate } : {}),
+        ...(canBackdate && useBackdate ? { order_date: orderDate } : {}),
+        historical_payment: historicalPayment && amountPaid > 0,
+        ...(historicalPayment && amountPaid > 0 ? { payment_date: historicalPaymentDate } : {}),
       };
 
       const response = await axios.post(`${API_BASE_URL}/orders`, orderData, {
@@ -2213,6 +2219,33 @@ export default function NewOrder() {
                       />
                     </div>
                   )}
+                </div>
+              )}
+
+              {canChooseBranch && amountPaid > 0 && (
+                <div className="border border-dashed border-blue-400 rounded-lg px-3 py-2 bg-blue-50 dark:bg-blue-950/30">
+                  <div className="flex items-center gap-2">
+                    <Checkbox id="historical-payment-create" checked={historicalPayment}
+                      onCheckedChange={(checked) => {
+                        const enabled = Boolean(checked);
+                        setHistoricalPayment(enabled);
+                        if (!enabled) setHistoricalPaymentDate(kampalaTodayYmd());
+                        else {
+                          const previousDay = new Date();
+                          previousDay.setDate(previousDay.getDate() - 1);
+                          setHistoricalPaymentDate(`${previousDay.getFullYear()}-${String(previousDay.getMonth() + 1).padStart(2, '0')}-${String(previousDay.getDate()).padStart(2, '0')}`);
+                        }
+                      }} />
+                    <label htmlFor="historical-payment-create" className="text-xs font-medium cursor-pointer select-none">
+                      Payment was received on a past date
+                    </label>
+                  </div>
+                  {historicalPayment && <div className="mt-2 flex items-center gap-2">
+                    <label htmlFor="historical-payment-date" className="text-xs whitespace-nowrap">Payment Date:</label>
+                    <input id="historical-payment-date" type="date" max={kampalaTodayYmd()} value={historicalPaymentDate}
+                      onChange={(e) => setHistoricalPaymentDate(e.target.value)}
+                      className="text-xs border rounded px-2 py-1 h-7 bg-background text-foreground flex-1" />
+                  </div>}
                 </div>
               )}
 
