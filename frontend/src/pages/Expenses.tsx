@@ -87,13 +87,6 @@ const formatExpenseDate = (value?: string | null) => {
   return parsed.toLocaleDateString('en-UG', { timeZone: 'Africa/Kampala' });
 };
 
-const formatRecordedAt = (value?: string | null) => {
-  if (!value) return '—';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '—';
-  return parsed.toLocaleString('en-UG', { timeZone: 'Africa/Kampala' });
-};
-
 const fetchAllExpenseRows = async (token: string, filters: Record<string, string>) => {
   const pageSize = 500;
   const headers = { Authorization: `Bearer ${token}` };
@@ -202,7 +195,13 @@ const Expenses = () => {
     const defaultBranch = activeBranches.find((branch) => branch.is_default);
     return String(assigned?.id ?? defaultBranch?.id ?? activeBranches[0]?.id ?? '');
   };
-  const [branches, setBranches] = useState<Array<{ id: number; name: string; is_active?: boolean; is_default?: boolean }>>([]);
+  const [branches, setBranches] = useState<Array<{ id: number; name: string; color?: string; is_active?: boolean; is_default?: boolean }>>([]);
+
+  const getBranchColor = (expense: Expense) => {
+    const branch = branches.find((item) => expense.branch_id && Number(item.id) === Number(expense.branch_id))
+      || branches.find((item) => item.name.trim().toLowerCase() === String(expense.branch_name || '').trim().toLowerCase());
+    return branch?.color && /^#[0-9A-Fa-f]{6}$/.test(branch.color) ? branch.color : '#3B82F6';
+  };
 
   const fetchExpenses = useCallback(async () => {
     if (!token) return;
@@ -548,14 +547,13 @@ const Expenses = () => {
       doc.text(`Generated: ${generated} (Africa/Kampala)`, 14, generatedY);
       doc.text(`Matching records: ${reportRows.length}   Approved total: ${formatUGX(approvedTotal)}   Pending: ${pending.length}`, 14, generatedY + 6);
       doc.setFontSize(8);
-      doc.text('Approved total excludes pending and rejected expenses. Each row shows expense date and entry recorded time.', 14, generatedY + 11);
+      doc.text('Approved total excludes pending and rejected expenses. Dates show when each expense occurred.', 14, generatedY + 11);
 
       autoTable(doc, {
         startY: generatedY + 16,
-        head: [['Expense Date', 'Recorded At (EAT)', 'Category', 'Description', 'Amount (UGX)', 'Method', 'Status', 'Branch', 'Recorded By', 'Receipt']],
+        head: [['Expense Date', 'Category', 'Description', 'Amount (UGX)', 'Method', 'Status', 'Branch', 'Recorded By', 'Receipt']],
         body: reportRows.map((row) => [
           formatExpenseDate(row.expense_date),
-          formatRecordedAt(row.created_at),
           row.category_name || '',
           row.description || '',
           formatUGX(Number(row.amount) || 0),
@@ -567,7 +565,7 @@ const Expenses = () => {
         ]),
         styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
         headStyles: { fillColor: [31, 78, 121] },
-        columnStyles: { 3: { cellWidth: 48 }, 8: { cellWidth: 28 } },
+        columnStyles: { 2: { cellWidth: 48 }, 7: { cellWidth: 28 } },
         margin: { left: 10, right: 10 },
       });
 
@@ -816,12 +814,12 @@ const Expenses = () => {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1250px]">
+            <table className="w-full min-w-[1050px]">
               <thead className="bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Expense Date</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Recorded At</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Category</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Description</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Amount</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Method</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Status</th>
@@ -856,13 +854,13 @@ const Expenses = () => {
                       <td className="px-4 py-3 text-sm dark:text-gray-300">
                         {formatExpenseDate(expense.expense_date)}
                       </td>
-                      <td className="px-4 py-3 text-sm dark:text-gray-300 whitespace-nowrap">
-                        {formatRecordedAt(expense.created_at)}
-                      </td>
                       <td className="px-4 py-3">
                         <Badge style={{ backgroundColor: expense.category_color }} className="text-white">
                           {expense.category_name}
                         </Badge>
+                      </td>
+                      <td className="max-w-[260px] px-4 py-3 text-sm dark:text-gray-300">
+                        <span className="block truncate" title={expense.description}>{expense.description || '—'}</span>
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-sm dark:text-gray-200">
                         {formatUGX(expense.amount)}
@@ -875,7 +873,13 @@ const Expenses = () => {
                       <td className="px-4 py-3">
                         <Badge className={getStatusColor(expense.status)}>{expense.status}</Badge>
                       </td>
-                      <td className="px-4 py-3 text-sm dark:text-gray-300">{expense.branch_name || '—'}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {expense.branch_name ? (
+                          <span title={expense.branch_name} className="inline-block max-w-full truncate rounded-full border px-2 py-0.5 text-xs font-medium" style={{ color: getBranchColor(expense), borderColor: `${getBranchColor(expense)}66`, backgroundColor: `${getBranchColor(expense)}1A` }}>
+                            {expense.branch_name}
+                          </span>
+                        ) : '—'}
+                      </td>
                       <td className="px-4 py-3 text-sm dark:text-gray-300">{expense.recorded_by_name}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-center gap-2">
