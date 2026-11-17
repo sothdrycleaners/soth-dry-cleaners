@@ -247,6 +247,13 @@ const isOverdue = (order: Order): boolean => {
   return false;
 };
 
+const normalizeOrderStatus = (status: unknown): string => {
+  const normalized = String(status || 'pending').trim().toLowerCase();
+  if (normalized === 'in_progress') return 'processing';
+  if (normalized === 'picked_up') return 'delivered';
+  return normalized;
+};
+
 // WhatsApp helper functions
 const toWhatsAppOrder = (order: Order, includeBranch = false): OrderWhatsAppPayload => ({
   order_number: order.order_number,
@@ -823,9 +830,9 @@ export default function Orders() {
   }, [highlightedOrderNumber]);
 
   // Fetch orders
-  const fetchOrders = useCallback(async () => {
+  const fetchOrders = useCallback(async (quiet = false) => {
     try {
-      setLoading(true);
+      if (!quiet) setLoading(true);
       const params: Record<string, string | number> = {
         page: currentPage,
         limit: pageSize,
@@ -855,17 +862,17 @@ export default function Orders() {
         headers: { Authorization: `Bearer ${token}` },
         params,
       });
-      setOrders(response.data.orders || []);
+      setOrders((response.data.orders || []).map((order: Order) => ({ ...order, order_status: normalizeOrderStatus(order.order_status) })));
       setTotalOrders(response.data.total || 0);
     } catch (error) {
       console.error('Error fetching orders:', error);
-      toast({
+      if (!quiet) toast({
         variant: 'destructive',
         title: 'Error',
         description: 'Failed to fetch orders',
       });
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [token, toast, currentPage, searchQuery, statusFilter, paymentFilter, backdatedFilter, branchFilter]);
 
@@ -1167,6 +1174,20 @@ export default function Orders() {
     }
   }, [token, fetchOrders]);
 
+  // Refresh the order list when staff return to this tab after changing statuses elsewhere.
+  useEffect(() => {
+    if (!token) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void fetchOrders(true);
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [token, fetchOrders]);
+
   // Reset to page 1 when search/filters change
   useEffect(() => {
     setCurrentPage(prev => prev !== 1 ? 1 : prev);
@@ -1331,7 +1352,7 @@ export default function Orders() {
         throw new Error('Invalid response from server');
       }
       
-      setSelectedOrder(response.data.order);
+      setSelectedOrder({ ...response.data.order, order_status: normalizeOrderStatus(response.data.order.order_status) });
       const fetchedItems = response.data.items || [];
       setOrderItems(fetchedItems);
       originalOrderItems.current = fetchedItems.map((item: OrderItem) => ({ ...item }));

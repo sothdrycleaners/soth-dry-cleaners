@@ -150,34 +150,39 @@ export const getOperationsReadyItems = async (req: AuthRequest, res: Response) =
   try {
     const { page, limit, offset } = pageOptions(req);
     const values: unknown[] = [];
-    let where = "os.status='READY' AND upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')";
-    where += dateSql(req, 'os.ready_at', values);
+    let where = "os.status IN ('PROCESSING','READY') AND upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')";
+    const workDate = "CASE WHEN os.status='READY' THEN COALESCE(os.ready_at,os.updated_at) ELSE os.updated_at END";
+    where += dateSql(req, workDate, values);
     const branch = branchIdFor(req);
     if (branch !== null) { values.push(branch); where += ` AND o.branch_id=$${values.length}`; }
+    const status = String(req.query.status || 'ALL').toUpperCase();
+    if (['PROCESSING','READY'].includes(status)) { values.push(status); where += ` AND os.status=$${values.length}`; }
     const search = String(req.query.search || '').trim();
     if (search) { values.push(`%${search}%`); where += ` AND (o.order_number ILIKE $${values.length} OR c.name ILIKE $${values.length} OR pi.name ILIKE $${values.length})`; }
-    const count = await query(
-      `SELECT count(*)::int total FROM public.operations_item_status os
+    const joins = `FROM public.operations_item_status os
        JOIN public.orders o ON o.id=os.order_id AND o.tenant_id=os.tenant_id
        JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
        JOIN public.order_items oi ON oi.id=os.order_item_id AND oi.tenant_id=os.tenant_id
        LEFT JOIN public.price_items pi ON pi.id=oi.price_item_id AND pi.tenant_id=oi.tenant_id
-       WHERE ${where}`, values
-    );
+       LEFT JOIN public.branches b ON b.id=o.branch_id`;
+    const count = await query(`SELECT count(*)::int total ${joins} WHERE ${where}`, values);
     const result = await query(
-      `SELECT oi.id item_id,pi.name,oi.quantity,oi.notes item_note,os.operations_note,o.id order_id,o.order_number,
-       c.name customer_name,b.name branch_name,o.branch_id FROM public.operations_item_status os
-       JOIN public.orders o ON o.id=os.order_id AND o.tenant_id=os.tenant_id
-       JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
-       JOIN public.order_items oi ON oi.id=os.order_item_id AND oi.tenant_id=os.tenant_id
-       LEFT JOIN public.price_items pi ON pi.id=oi.price_item_id AND pi.tenant_id=oi.tenant_id
-       LEFT JOIN public.branches b ON b.id=o.branch_id WHERE ${where}
-       ORDER BY os.ready_at DESC NULLS LAST,oi.id DESC LIMIT $${values.length+1} OFFSET $${values.length+2}`,
+      `SELECT oi.id item_id,pi.name item_name,oi.quantity,oi.notes item_note,os.operations_note,os.status,
+       ${workDate} worked_at,o.id order_id,o.order_number,c.name customer_name,b.name branch_name,b.color branch_color,o.branch_id
+       ${joins} WHERE ${where}
+       ORDER BY ${workDate} DESC NULLS LAST,o.order_number DESC,oi.id DESC LIMIT $${values.length+1} OFFSET $${values.length+2}`,
       [...values, limit, offset]
     );
+    const topItems = await query(
+      `SELECT COALESCE(pi.name,'Unlisted item') item_name,SUM(oi.quantity)::int quantity,
+       COUNT(DISTINCT oi.id)::int item_lines,COUNT(DISTINCT oi.order_id)::int orders
+       ${joins} WHERE ${where}
+       GROUP BY COALESCE(pi.name,'Unlisted item')
+       ORDER BY SUM(oi.quantity) DESC,COALESCE(pi.name,'Unlisted item') ASC LIMIT 6`, values
+    );
     const total = Number(count.rows[0]?.total || 0);
-    res.json({ items: result.rows, total, page, limit, totalPages: Math.ceil(total / limit) });
-  } catch (error) { console.error('Operations ready report error:', error); res.status(500).json({ error: 'Unable to load ready items' }); }
+    res.json({ items: result.rows, summary: { top_items: topItems.rows }, total, page, limit, totalPages: Math.ceil(total / limit) });
+  } catch (error) { console.error('Operations work report error:', error); res.status(500).json({ error: 'Unable to load Operations work report' }); }
 };
 export const updateOperationsItem = async (req: AuthRequest, res: Response) => {
   const itemId = Number(req.params.itemId), status = String(req.body.status || '').toUpperCase();
@@ -331,7 +336,7 @@ export const sendOperationsMessage = async (req: AuthRequest, res: Response) => 
 
 export const getOperationsBranches = async (_req: AuthRequest, res: Response) => {
  try {
-  const result = await query("SELECT id,name FROM public.branches WHERE tenant_id=app_current_tenant_id() AND is_active=TRUE ORDER BY is_default DESC,name");
+  const result = await query("SELECT id,name,color FROM public.branches WHERE tenant_id=app_current_tenant_id() AND is_active=TRUE ORDER BY is_default DESC,name");
   res.json({ branches: result.rows });
  } catch (error) { console.error('Operations branch list error:',error); res.status(500).json({error:'Unable to load branches'}); }
 };
