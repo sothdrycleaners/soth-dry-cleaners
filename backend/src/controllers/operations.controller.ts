@@ -39,9 +39,9 @@ async function listOrders(req: AuthRequest, delivered = false) {
   const { page, limit, offset } = pageOptions(req);
   const values: unknown[] = [];
   let where = delivered ? "upper(o.status::text)='DELIVERED'" : "upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')";
-  // Historical queue orders belong by business date; delivered history keeps its existing recorded-date behavior.
+  // Historical queue orders use their business date; delivered history is ordered and filtered by its latest status update.
   const orderDateExpression = delivered
-    ? 'COALESCE(o.recorded_at,o.created_at)'
+    ? 'COALESCE(o.updated_at,o.recorded_at,o.created_at)'
     : 'COALESCE(o.created_at,o.recorded_at)';
   where += dateSql(req, orderDateExpression, values);
   const branchId = branchIdFor(req);
@@ -129,6 +129,7 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
        WHERE upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')${branchClause}
        GROUP BY o.id,c.id,b.id
        HAVING BOOL_OR(os.status='READY' AND os.updated_by IS NOT NULL)
+          AND NOT BOOL_OR(upper(COALESCE(oi.service_type,''))='EXPRESS')
        ORDER BY MAX(os.updated_at) DESC NULLS LAST,o.id DESC
        LIMIT 40`,
       values
@@ -137,7 +138,7 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
     res.json({
       order_counts: { received: Number(row.received || 0), processing: Number(row.processing || 0), ready: Number(row.ready || 0) },
       total_active_orders: Number(row.active_orders || 0),
-      express_orders: result.orders.filter((o: any) => o.is_express).slice(0, 40),
+      express_orders: result.orders.filter((o: any) => o.is_express).slice(0, 50),
       in_progress_orders: startedOrders.rows,
     });
   } catch (error) { console.error('Operations summary error:', error); res.status(500).json({ error: 'Unable to load Operations summary' }); }
