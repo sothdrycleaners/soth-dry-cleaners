@@ -79,7 +79,7 @@ async function listOrders(req: AuthRequest, delivered = false) {
      LEFT JOIN public.price_items pi ON pi.id=oi.price_item_id AND pi.tenant_id=oi.tenant_id
      LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
      WHERE ${where} GROUP BY o.id,c.id,b.id,u.id
-     ORDER BY ${orderDateExpression} DESC,o.id DESC
+     ORDER BY ${delivered ? '' : 'is_express DESC,'}${orderDateExpression} DESC,o.id DESC
      LIMIT $${values.length+1} OFFSET $${values.length+2}`,
     [...values, limit, offset]
   );
@@ -130,14 +130,14 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
        GROUP BY o.id,c.id,b.id
        HAVING BOOL_OR(os.status='READY' AND os.updated_by IS NOT NULL)
        ORDER BY MAX(os.updated_at) DESC NULLS LAST,o.id DESC
-       LIMIT 12`,
+       LIMIT 40`,
       values
     );
     const row = totals.rows[0] || {};
     res.json({
       order_counts: { received: Number(row.received || 0), processing: Number(row.processing || 0), ready: Number(row.ready || 0) },
       total_active_orders: Number(row.active_orders || 0),
-      express_orders: result.orders.filter((o: any) => o.is_express).slice(0, 8),
+      express_orders: result.orders.filter((o: any) => o.is_express).slice(0, 40),
       in_progress_orders: startedOrders.rows,
     });
   } catch (error) { console.error('Operations summary error:', error); res.status(500).json({ error: 'Unable to load Operations summary' }); }
