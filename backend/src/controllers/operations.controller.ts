@@ -68,7 +68,7 @@ async function listOrders(req: AuthRequest, delivered = false) {
       COALESCE(bool_or(upper(COALESCE(oi.service_type,''))='EXPRESS'),FALSE) is_express,o.branch_id,b.name branch_name,
       ${orderDateExpression} received_at,o.due_date,
       c.name customer_name,c.customer_id customer_number,u.full_name recorded_by,
-      COALESCE(json_agg(json_build_object('id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,'service_type',oi.service_type,'express_due_at',oi.express_due_at,
+      COALESCE(json_agg(json_build_object('id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,'operations_note',os.operations_note,'service_type',oi.service_type,'express_due_at',oi.express_due_at,
         'status',CASE WHEN upper(o.status::text) IN ('READY','DELIVERED') THEN 'READY' WHEN upper(o.status::text)='PROCESSING' AND COALESCE(os.status,'RECEIVED')='RECEIVED' THEN 'PROCESSING' ELSE COALESCE(os.status,'RECEIVED') END,
         'ready_at',os.ready_at) ORDER BY oi.id) FILTER(WHERE oi.id IS NOT NULL),'[]'::json) items
      FROM public.orders o
@@ -112,7 +112,7 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
         o.branch_id,b.name branch_name,COALESCE(o.created_at,o.recorded_at) received_at,
         c.name customer_name,
         COALESCE(json_agg(json_build_object(
-          'id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,
+          'id',oi.id,'name',pi.name,'quantity',oi.quantity,'note',oi.notes,'operations_note',os.operations_note,
           'service_type',oi.service_type,'express_due_at',oi.express_due_at,
           'status',CASE WHEN upper(o.status::text) IN ('READY','DELIVERED') THEN 'READY'
             WHEN upper(o.status::text)='PROCESSING' AND COALESCE(os.status,'RECEIVED')='RECEIVED' THEN 'PROCESSING'
@@ -164,7 +164,7 @@ export const getOperationsReadyItems = async (req: AuthRequest, res: Response) =
        WHERE ${where}`, values
     );
     const result = await query(
-      `SELECT oi.id item_id,pi.name,oi.quantity,oi.notes item_note,os.ready_at,o.id order_id,o.order_number,
+      `SELECT oi.id item_id,pi.name,oi.quantity,oi.notes item_note,os.operations_note,o.id order_id,o.order_number,
        c.name customer_name,b.name branch_name,o.branch_id FROM public.operations_item_status os
        JOIN public.orders o ON o.id=os.order_id AND o.tenant_id=os.tenant_id
        JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
@@ -268,13 +268,19 @@ export const markOperationsOrderReady = async (req: AuthRequest, res: Response) 
 };
 export const updateOperationsItemNote = async (req: AuthRequest, res: Response) => {
   const itemId = Number(req.params.itemId), note = String(req.body.note || '').trim();
-  if (!Number.isSafeInteger(itemId) || itemId < 1 || note.length > 2000) return res.status(400).json({ error: 'Note must be 2,000 characters or fewer' });
+  if (!Number.isSafeInteger(itemId) || itemId < 1 || note.length > 500) return res.status(400).json({ error: 'Operations notes must be 500 characters or fewer' });
   try {
     const branch = branchIdFor(req);
     const result = await query(
-      `UPDATE public.order_items oi SET notes=$2,updated_at=NOW() FROM public.orders o
-       WHERE oi.id=$1 AND o.id=oi.order_id AND oi.tenant_id=app_current_tenant_id() AND upper(o.status::text)<>'DELIVERED'
-       AND ($3::int IS NULL OR o.branch_id=$3) RETURNING oi.id`, [itemId,note || null,branch]
+      `INSERT INTO public.operations_item_status AS existing
+        (tenant_id,order_id,order_item_id,status,operations_note,updated_by,updated_at)
+       SELECT oi.tenant_id,o.id,oi.id,'RECEIVED',$2,$4,NOW()
+       FROM public.order_items oi JOIN public.orders o ON o.id=oi.order_id AND o.tenant_id=oi.tenant_id
+       WHERE oi.id=$1 AND oi.tenant_id=app_current_tenant_id() AND upper(o.status::text)<>'DELIVERED'
+         AND upper(o.status::text)<>'CANCELLED' AND ($3::int IS NULL OR o.branch_id=$3)
+       ON CONFLICT (tenant_id,order_item_id) DO UPDATE
+         SET operations_note=EXCLUDED.operations_note,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+       RETURNING existing.order_item_id`, [itemId,note || null,branch,req.user?.id || null]
     );
     if (!result.rowCount) return res.status(404).json({ error: 'Active item not found or outside your branch' });
     res.json({ success: true });
