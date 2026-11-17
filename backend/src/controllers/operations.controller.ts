@@ -195,7 +195,7 @@ export const updateOperationsItem = async (req: AuthRequest, res: Response) => {
     if (branchFilter !== null && Number(found.rows[0].branch_id) !== branchFilter) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'You cannot update this branch item' }); }
     await client.query(
       `INSERT INTO public.operations_item_status(tenant_id,order_id,order_item_id,status,ready_at,updated_by,updated_at)
-       SELECT oi.tenant_id,oi.order_id,oi.id,$2,CASE WHEN $2='READY' THEN NOW() ELSE NULL END,$3,NOW()
+       SELECT oi.tenant_id,oi.order_id,oi.id,$2::text,CASE WHEN $2::text='READY' THEN NOW() ELSE NULL END,$3,NOW()
        FROM public.order_items oi WHERE oi.id=$1 AND oi.tenant_id=app_current_tenant_id()
        ON CONFLICT(tenant_id,order_item_id) DO UPDATE SET status=EXCLUDED.status,ready_at=EXCLUDED.ready_at,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
       [itemId,status,req.user!.id]
