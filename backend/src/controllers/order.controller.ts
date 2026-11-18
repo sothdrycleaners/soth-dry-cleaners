@@ -15,6 +15,7 @@ import { notifyAdministrators } from './notifications.controller';
 import { calendarDateToTimestamp, extractYmd, kampalaTodayYmd, toKampalaYmd, ymdToPgTimestamp } from '../utils/businessDate';
 import fs from 'fs';
 import ExcelJS from 'exceljs';
+import { applyCustomerCreditInTransaction, getAvailableCustomerCredit, releaseOrderCreditAllocations } from '../services/customerCredit.service';
 
 type SettingsQuerier = { query: (text: string) => Promise<any> };
 
@@ -726,6 +727,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       payment_status = 'UNPAID',
       payment_method = 'CASH',
       amount_paid = 0,
+      customer_credit_amount = 0,
+      keep_excess_as_credit = false,
       transaction_reference,
       historical_payment = false,
       pickup_date, 
@@ -1180,52 +1183,48 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     const year = new Date().getFullYear();
     const order_number = `ORD${year}${String(nextNumber).padStart(4, '0')}`;
     
-    // On Account = credit sale: force unpaid with zero amount paid
-    let finalPaymentMethod = payment_method || 'CASH';
-    let finalAmountPaidValue = Math.max(0, Number(amount_paid) || 0);
+    // Customer advances are kept in an append-only ledger. Lock the customer
+    // row while reading the balance so concurrent orders cannot spend it twice.
+    let finalPaymentMethod = String(payment_method || 'CASH').toUpperCase();
     const requestedStatus = String(payment_status || 'UNPAID').toUpperCase();
-
-    if (finalPaymentMethod === 'ON_ACCOUNT') {
-      finalAmountPaidValue = 0;
-      console.log('💳 On Account selected — payment status forced to UNPAID');
-    } else if (
-      // Staff clicked Cash + Paid but left Amount Paid empty → treat as full payment received
-      requestedStatus === 'PAID' &&
-      finalAmountPaidValue <= 0 &&
-      total_amount > 0
-    ) {
-      finalAmountPaidValue = total_amount;
-      console.log(`💵 PAID with blank amount — auto-filled full payment UGX ${total_amount.toLocaleString()}`);
+    let cashTendered = Math.max(0, Number(amount_paid) || 0);
+    let availableCustomerCredit = 0;
+    const requestedCustomerCredit = Math.max(0, Number(customer_credit_amount) || 0);
+    const excessToCredit = keep_excess_as_credit === true || keep_excess_as_credit === 'true';
+    if (requestedCustomerCredit > 0 || excessToCredit) {
+      const customerLock = await client.query(
+        `SELECT id FROM customers WHERE id = $1 AND tenant_id = app_current_tenant_id() FOR UPDATE`,
+        [customer_id]
+      );
+      if (!customerLock.rowCount) throw new Error('Customer not found');
+      availableCustomerCredit = await getAvailableCustomerCredit(client, Number(customer_id));
+      if (requestedCustomerCredit > availableCustomerCredit + 0.009) {
+        throw new Error(`Requested credit exceeds the available balance of UGX ${Math.floor(availableCustomerCredit).toLocaleString()}.`);
+      }
+      if (requestedCustomerCredit > total_amount + 0.009) {
+        throw new Error('Customer credit applied cannot exceed this order total.');
+      }
     }
-
-    if (finalPaymentMethod !== 'ON_ACCOUNT' && requestedStatus === 'PARTIAL' && finalAmountPaidValue <= 0) {
-      throw new Error('Enter the partial payment amount before creating the order.');
+    const creditAppliedValue = requestedCustomerCredit;
+    const cashDueAfterCredit = Math.max(0, total_amount - creditAppliedValue);
+    if (finalPaymentMethod === 'ON_ACCOUNT') cashTendered = 0;
+    else if (requestedStatus === 'PAID' && cashTendered <= 0 && total_amount > 0) cashTendered = cashDueAfterCredit;
+    if (requestedStatus === 'PARTIAL' && cashTendered <= 0 && creditAppliedValue <= 0) {
+      throw new Error('Enter a partial payment amount or apply available customer credit.');
     }
-
-    // Derive payment_status from amounts (source of truth)
-    if (finalAmountPaidValue > total_amount) {
-      const amountPaidDisplay = finalAmountPaidValue.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-      const totalDisplay = total_amount.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-      throw new Error(`Payment amount (UGX ${amountPaidDisplay}) exceeds the order total (UGX ${totalDisplay}). Maximum payment allowed is UGX ${totalDisplay}.`);
+    const cashAppliedToOrder = Math.min(cashTendered, cashDueAfterCredit);
+    const overpaymentCreditValue = Math.max(0, cashTendered - cashAppliedToOrder);
+    if (overpaymentCreditValue > 0 && !excessToCredit) {
+      throw new Error('The receipt exceeds the amount due. Confirm that the excess should be kept as customer credit.');
     }
-
+    const finalAmountPaidValue = Math.min(total_amount, creditAppliedValue + cashAppliedToOrder);
+    if (cashAppliedToOrder === 0 && creditAppliedValue > 0) finalPaymentMethod = 'CUSTOMER_CREDIT';
     let finalPaymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';
-    if (finalAmountPaidValue <= 0) {
-      finalPaymentStatus = 'UNPAID';
-      finalAmountPaidValue = 0;
-    } else if (finalAmountPaidValue >= total_amount && total_amount > 0) {
-      finalPaymentStatus = 'PAID';
-      finalAmountPaidValue = total_amount;
-    } else if (total_amount <= 0) {
-      finalPaymentStatus = 'UNPAID';
-      finalAmountPaidValue = 0;
-    } else {
-      finalPaymentStatus = 'PARTIAL';
-    }
-
-    // Calculate balance
+    if (finalAmountPaidValue <= 0 || total_amount <= 0) finalPaymentStatus = 'UNPAID';
+    else if (finalAmountPaidValue >= total_amount) finalPaymentStatus = 'PAID';
+    else finalPaymentStatus = 'PARTIAL';
     const balance = Math.max(0, total_amount - finalAmountPaidValue);
-    
+
     // Generate invoice number
     const invoiceMaxResult = await client.query(
       `SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_number FROM 10) AS INTEGER)), 0) as max_number 
@@ -1293,40 +1292,44 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       );
     }
     
-    // Always create a payments ledger row when money was received (links order ↔ Payments ↔ accounting)
-    if (finalAmountPaidValue > 0 && finalPaymentMethod !== 'ON_ACCOUNT') {
-      const todayYmd = kampalaTodayYmd();
-      const requestedPaymentYmd = extractYmd(requestedCreatePaymentDate);
-      const isHistoricalPayment = historical_payment === true || historical_payment === 'true';
-      if (isHistoricalPayment && (!requestedPaymentYmd || requestedPaymentYmd >= todayYmd)) {
-        throw new Error('Choose a payment date earlier than today for a historical payment.');
-      }
-      const paymentYmd = isHistoricalPayment ? requestedPaymentYmd! : todayYmd;
-      await client.query(
-        `INSERT INTO payments (
-          order_id,
-          customer_id,
-          amount,
-          payment_method,
-          transaction_reference,
-          payment_date,
-          notes,
-          created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6::timestamp, $7, $8)`,
-        [
-          orderId,
-          customer_id,
-          finalAmountPaidValue,
-          finalPaymentMethod,
-          transaction_reference || null,
-          ymdToPgTimestamp(paymentYmd),
-          `Initial payment for order ${order_number}`,
-          req.user!.id
-        ]
-      );
-      console.log(`💰 Payment transaction created: ${finalPaymentMethod} - UGX ${finalAmountPaidValue.toLocaleString()} → order ${order_number}`);
+    // Actual order cash stays in payments. Credit applications are non-cash
+    // settlements. Any extra tender is an advance, not service revenue.
+    const todayYmd = kampalaTodayYmd();
+    const requestedPaymentYmd = extractYmd(requestedCreatePaymentDate);
+    const isHistoricalPayment = historical_payment === true || historical_payment === 'true';
+    if (isHistoricalPayment && (cashTendered > 0 || creditAppliedValue > 0) && (!requestedPaymentYmd || requestedPaymentYmd >= todayYmd)) {
+      throw new Error('Choose a payment date earlier than today for a historical payment.');
     }
-    
+    const paymentYmd = isHistoricalPayment ? requestedPaymentYmd! : todayYmd;
+    if (cashAppliedToOrder > 0) {
+      await client.query(
+        `INSERT INTO payments (order_id, customer_id, amount, payment_method, transaction_reference, payment_date, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6::timestamp, $7, $8)`,
+        [orderId, customer_id, cashAppliedToOrder, payment_method, transaction_reference || null,
+         ymdToPgTimestamp(paymentYmd), `Initial cash payment for order ${order_number}`, req.user!.id]
+      );
+    }
+    if (creditAppliedValue > 0) {
+      await applyCustomerCreditInTransaction(client, {
+        customerId: Number(customer_id),
+        orderId,
+        branchId,
+        amount: creditAppliedValue,
+        paymentDate: ymdToPgTimestamp(paymentYmd),
+        createdBy: req.user!.id,
+        notes: `Customer credit applied to order ${order_number}`,
+      });
+    }
+    if (overpaymentCreditValue > 0) {
+      await client.query(
+        `INSERT INTO customer_credit_transactions
+           (customer_id, order_id, branch_id, entry_type, amount, payment_method, transaction_reference, payment_date, notes, created_by)
+         VALUES ($1, $2, $3, 'ORDER_OVERPAYMENT', $4, $5, $6, $7::timestamp, $8, $9)`,
+        [customer_id, orderId, branchId, overpaymentCreditValue, payment_method, transaction_reference || null,
+         ymdToPgTimestamp(paymentYmd), `Excess receipt from order ${order_number}`, req.user!.id]
+      );
+    }
+
     await client.query('COMMIT');
     
     const createdOrder = orderResult.rows[0];
@@ -1913,8 +1916,25 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
     updateQuery += ` WHERE id = $${paramCount} RETURNING *`;
     updateValues.push(id);
     
-    // Update order status
-    const result = await query(updateQuery, updateValues);
+    // Cancelled orders restore any customer credit applied to them. The unique
+    // ledger index makes this idempotent if concurrent status requests race.
+    let result;
+    if (dbStatus === 'cancelled' && oldStatus !== 'cancelled') {
+      const cancellationClient = await getClient();
+      try {
+        await beginTenantTransaction(cancellationClient);
+        result = await cancellationClient.query(updateQuery, updateValues);
+        await releaseOrderCreditAllocations(cancellationClient, Number(id), req.user!.id);
+        await cancellationClient.query('COMMIT');
+      } catch (error) {
+        try { await cancellationClient.query('ROLLBACK'); } catch {}
+        throw error;
+      } finally {
+        cancellationClient.release();
+      }
+    } else {
+      result = await query(updateQuery, updateValues);
+    }
     
     // Send SMS notification if status changed to READY
     if (oldStatus !== 'ready' && dbStatus === 'ready' && customerPhone) {
@@ -2153,6 +2173,8 @@ export const deleteOrder = async (req: AuthRequest, res: Response) => {
     console.log(`🗑️ Deleting order #${order.order_number}`);
     console.log(`💰 Financial Impact: Total=${totalAmount}, Paid=${amountPaid}, Balance=${balance}`);
     
+    await releaseOrderCreditAllocations(client, Number(id), userId!);
+
     // Delete order (cascade will handle order_items and payments)
     await client.query('DELETE FROM orders WHERE id = $1', [id]);
     

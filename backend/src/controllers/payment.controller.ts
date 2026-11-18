@@ -7,6 +7,7 @@ import { createSystemNotification, notifyAdministrators } from './notifications.
 import { forbiddenIfOutsideBranch, resolveListBranchId } from '../utils/branchScope';
 import { extractYmd, kampalaTodayYmd, ymdToPgTimestamp } from '../utils/businessDate';
 import { logDelete } from '../utils/activityLogger';
+import { applyCustomerCreditInTransaction } from '../services/customerCredit.service';
 
 /**
  * Recalculate order payment totals from remaining payments ledger rows.
@@ -25,9 +26,11 @@ async function syncOrderPaymentFromLedger(orderId: number | string) {
 
   // Only sum active (non-cancelled) payments for the balance calculation
   const sumResult = await query(
-    `SELECT COALESCE(SUM(amount), 0) as net_paid
-     FROM payments
-     WHERE order_id = $1 AND (is_cancelled IS NULL OR is_cancelled = FALSE)`,
+    `SELECT
+       COALESCE((SELECT SUM(amount) FROM payments
+         WHERE order_id = $1 AND (is_cancelled IS NULL OR is_cancelled = FALSE)), 0)
+       + COALESCE((SELECT SUM(-amount) FROM customer_credit_transactions
+         WHERE order_id = $1 AND entry_type = 'APPLICATION'), 0) AS net_paid`,
     [orderId]
   );
   const netPaid = Math.max(0, Number(sumResult.rows[0].net_paid) || 0);
@@ -929,6 +932,7 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
     const { orderId } = req.params;
     const {
       amount,
+      customer_credit_amount = 0,
       payment_method,
       payment_date,
       historical_payment = false,
@@ -937,9 +941,9 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
     } = req.body || {};
 
     const paymentAmount = parseFloat(String(amount));
-    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
-      return res.status(400).json({ error: 'Payment amount must be greater than zero' });
-    }
+    const creditAmount = Number(customer_credit_amount) || 0;
+    if (!Number.isFinite(paymentAmount) || paymentAmount < 0 || !Number.isFinite(creditAmount) || creditAmount < 0 || (paymentAmount <= 0 && creditAmount <= 0))
+      return res.status(400).json({ error: 'Enter a cash payment or customer credit amount.' });
 
     await beginTenantTransaction(client);
 
@@ -958,20 +962,21 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
     }
 
     const paidRow = await client.query(
-      `SELECT COALESCE(SUM(amount), 0) as net_paid
-       FROM payments
-       WHERE order_id = $1 AND (is_cancelled IS NULL OR is_cancelled = FALSE)`,
+      `SELECT COALESCE((SELECT SUM(amount) FROM payments
+         WHERE order_id = $1 AND (is_cancelled IS NULL OR is_cancelled = FALSE)), 0)
+       + COALESCE((SELECT SUM(-amount) FROM customer_credit_transactions
+         WHERE order_id = $1 AND entry_type = 'APPLICATION'), 0) AS net_paid`,
       [order.id]
     );
     const netPaid = Number(paidRow.rows[0].net_paid) || 0;
     const totalAmount = Number(order.total_amount ?? order.total) || 0;
     const remaining = Math.max(0, totalAmount - netPaid);
 
-    if (paymentAmount > remaining + 0.009) {
+    if (paymentAmount + creditAmount > remaining + 0.009) {
       await client.query('ROLLBACK');
       const remainingDisplay = remaining.toLocaleString();
       const totalDisplay = totalAmount.toLocaleString();
-      const paymentDisplay = paymentAmount.toLocaleString();
+      const paymentDisplay = (paymentAmount + creditAmount).toLocaleString();
       return res.status(400).json({
         error:
           remaining <= 0
@@ -983,7 +988,27 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const recentDuplicate = await client.query(
+    if (creditAmount > 0) {
+      const customerLock = await client.query(
+        `SELECT id FROM customers WHERE id = $1 AND tenant_id = app_current_tenant_id() FOR UPDATE`,
+        [order.customer_id]
+      );
+      if (!customerLock.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Customer not found' });
+      }
+      const available = await client.query(
+        `SELECT COALESCE(SUM(amount), 0) AS available_credit
+         FROM customer_credit_transactions
+         WHERE customer_id = $1 AND tenant_id = app_current_tenant_id()`, [order.customer_id]
+      );
+      if (creditAmount > Number(available.rows[0]?.available_credit || 0) + 0.009) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Applied amount exceeds the customer’s available credit.' });
+      }
+    }
+
+    const recentDuplicate = paymentAmount > 0 ? await client.query(
       `SELECT id FROM payments
        WHERE order_id = $1
          AND amount = $2
@@ -991,7 +1016,7 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
          AND created_at > NOW() - INTERVAL '10 seconds'
        LIMIT 1`,
       [order.id, paymentAmount]
-    );
+    ) : { rows: [] };
     if (recentDuplicate.rows.length > 0) {
       await client.query('ROLLBACK');
       return res.status(409).json({
@@ -1006,9 +1031,8 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Choose a payment date earlier than today for a historical payment.' });
     }
-    const paymentYmd = isHistoricalPayment ? requestedPaymentYmd! : todayYmd;
-
-    const inserted = await client.query(
+    const paymentYmd = isHistoricalPayment ? requestedPaymentYmd! : requestedPaymentYmd || todayYmd;
+    const inserted = paymentAmount > 0 ? await client.query(
       `INSERT INTO payments (
         order_id,
         customer_id,
@@ -1030,9 +1054,21 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
         notes ? `Manual payment: ${notes}` : 'Manual payment added to order',
         req.user?.id || null,
       ]
-    );
+    ) : { rows: [] };
 
-    if (payment_method) {
+    if (creditAmount > 0) {
+      await applyCustomerCreditInTransaction(client, {
+        customerId: Number(order.customer_id),
+        orderId: Number(order.id),
+        branchId: order.branch_id == null ? null : Number(order.branch_id),
+        amount: creditAmount,
+        paymentDate: ymdToPgTimestamp(paymentYmd),
+        createdBy: Number(req.user?.id),
+        notes: `Customer credit applied to order ${order.order_number}`,
+      });
+    }
+
+    if (payment_method && paymentAmount > 0) {
       await client.query(
         `UPDATE orders SET payment_method = $1 WHERE id = $2`,
         [payment_method, order.id]
@@ -1045,7 +1081,8 @@ export const addOrderPayment = async (req: AuthRequest, res: Response) => {
 
     res.json({
       message: 'Payment recorded',
-      payment: inserted.rows[0],
+      payment: inserted.rows[0] || null,
+      credit_applied: creditAmount,
       order: updatedOrder,
       payment_date: paymentYmd,
     });
@@ -1113,8 +1150,20 @@ export const getPaymentsByOrder = async (req: AuthRequest, res: Response) => {
        ORDER BY p.payment_date DESC, p.id DESC`,
       [orderId]
     );
-
-    res.json(result.rows);
+    const creditApplications = await query(
+      `SELECT -ct.id AS id, ct.order_id, -ct.amount AS amount,
+              'CUSTOMER_CREDIT'::text AS payment_method,
+              ct.transaction_reference, ct.payment_date, ct.notes, ct.created_by, ct.created_at,
+              FALSE AS is_refund, NULL::text AS refund_reason, NULL::timestamp AS refund_date,
+              NULL::integer AS refunded_payment_id, u.full_name AS received_by,
+              0::numeric AS amount_refunded, 'CUSTOMER_CREDIT'::text AS source_type
+       FROM customer_credit_transactions ct
+       LEFT JOIN users u ON u.id = ct.created_by
+       WHERE ct.order_id = $1 AND ct.entry_type = 'APPLICATION'`, [orderId]
+    );
+    res.json([...result.rows, ...creditApplications.rows].sort((a: any, b: any) =>
+      new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime() || Number(b.id) - Number(a.id)
+    ));
   } catch (error) {
     console.error('Get payments by order error:', error);
     res.status(500).json({ error: 'Failed to fetch payment transactions' });

@@ -39,6 +39,7 @@ export type OrderWhatsAppPayload = {
   tax_amount?: number;
   total_amount: number;
   amount_paid: number;
+  credit_applied?: number;
   balance: number;
   payment_status?: string;
   payment_method?: string;
@@ -200,6 +201,9 @@ function buildPaymentSummaryLines(order: OrderWhatsAppPayload): string[] {
     `Total: *${formatUGX(order.total_amount)}*`,
     `Paid: ${formatUGX(order.amount_paid)}`,
   ];
+  if (Number(order.credit_applied || 0) > 0) {
+    lines.push(`Includes account credit: ${formatUGX(Number(order.credit_applied))}`);
+  }
   if (Number(order.balance || 0) > 0) lines.push(`Balance due: *${formatUGX(order.balance)}*`);
   else lines.push('Payment complete.');
   if (String(order.payment_method || '').toUpperCase() === 'ON_ACCOUNT') {

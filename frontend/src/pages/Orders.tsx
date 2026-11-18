@@ -148,6 +148,7 @@ interface PaymentTransaction {
   created_by?: number;
   created_at: string;
   received_by?: string;  // Staff member who received the payment
+  source_type?: string;
 }
 
 interface OrderDelivery {
@@ -719,6 +720,9 @@ export default function Orders() {
     !selectedOrderBranch || Boolean(selectedOrderBranch.is_default)
   );
   const [additionalPayment, setAdditionalPayment] = useState(0);
+  const [availableCustomerCredit, setAvailableCustomerCredit] = useState(0);
+  const [applyCustomerCredit, setApplyCustomerCredit] = useState(false);
+  const [customerCreditAmount, setCustomerCreditAmount] = useState(0);
   const [recordingPayment, setRecordingPayment] = useState(false);
   const recordingPaymentRef = useRef(false);
   const [paymentDate, setPaymentDate] = useState(kampalaTodayYmd());
@@ -1402,10 +1406,32 @@ export default function Orders() {
     }
   };
 
+  const openAddPaymentDialog = (order: Order, amountOverride?: number) => {
+    setSelectedOrder(order);
+    const total = Number(order.total_amount) || 0;
+    const paid = Number(order.amount_paid) || 0;
+    const remaining = Math.max(0, total - paid);
+    setAdditionalPayment(amountOverride ?? (remaining > 0 ? remaining : total));
+    setAvailableCustomerCredit(0);
+    setApplyCustomerCredit(false);
+    setCustomerCreditAmount(0);
+    setPaymentMethod('CASH');
+    setPaymentChannel('');
+    setTransactionReference('');
+    setPaymentDate(defaultPaymentYmd());
+    setShowPaymentDialog(true);
+    if (order.customer_id && token) {
+      axios.get(`${API_BASE_URL}/customers/${order.customer_id}/credit`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((response) => setAvailableCustomerCredit(Math.max(0, Number(response.data.available_credit) || 0)))
+        .catch((error) => console.error('Failed to load customer credit:', error));
+    }
+  };
+
   // Update payment
   const handleUpdatePayment = async () => {
     if (recordingPaymentRef.current || recordingPayment) return;
-    if (!selectedOrder || additionalPayment <= 0) {
+    if (!selectedOrder || (additionalPayment <= 0 && customerCreditAmount <= 0)) {
       toast({
         variant: 'destructive',
         title: 'Invalid Amount',
@@ -1427,7 +1453,7 @@ export default function Orders() {
     }
 
     const remainingDue = Math.max(0, totalAmount - currentPaid);
-    if (additionalPayment > remainingDue + 0.009) {
+    if (additionalPayment + customerCreditAmount > remainingDue + 0.009) {
       toast({
         variant: 'destructive',
         title: 'Amount exceeds order total',
@@ -1443,7 +1469,7 @@ export default function Orders() {
     setRecordingPayment(true);
 
     try {
-      const newAmountPaid = currentPaid + additionalPayment;
+      const newAmountPaid = currentPaid + additionalPayment + customerCreditAmount;
       const newBalance = Math.max(0, totalAmount - newAmountPaid);
 
       // Payment choices already carry the selected provider in their method code.
@@ -1453,6 +1479,7 @@ export default function Orders() {
         `${API_BASE_URL}/payments/order/${selectedOrder.id}`,
         {
           amount: additionalPayment,
+          customer_credit_amount: customerCreditAmount,
           payment_method: finalPaymentMethod,
           historical_payment: paymentDate < kampalaTodayYmd(),
           payment_date: paymentDate,
@@ -1472,11 +1499,14 @@ export default function Orders() {
 
       toast({
         title: '✅ Payment Updated',
-        description: `Added ${formatUGX(additionalPayment)} via ${paymentMethodDisplay}${channelDisplay}. ${newBalance <= 0 ? 'Order fully paid!' : `Balance: ${formatUGX(newBalance)}`}`,
+        description: `${additionalPayment > 0 ? `Received ${formatUGX(additionalPayment)} via ${paymentMethodDisplay}${channelDisplay}. ` : ''}${customerCreditAmount > 0 ? `Applied ${formatUGX(customerCreditAmount)} customer credit. ` : ''}${newBalance <= 0 ? 'Order fully paid!' : `Balance: ${formatUGX(newBalance)}`}`,
       });
 
       setShowPaymentDialog(false);
       setAdditionalPayment(0);
+      setApplyCustomerCredit(false);
+      setCustomerCreditAmount(0);
+      setAvailableCustomerCredit(0);
       setPaymentMethod('CASH');
       setPaymentChannel('');
       setTransactionReference('');
@@ -2628,7 +2658,7 @@ export default function Orders() {
                             </TableCell>
                             <TableCell className="px-2 sm:px-4">
                               <Badge variant="outline" className="bg-green-100 dark:bg-green-900">
-                                {payment.payment_method.replace(/_/g, ' ')}
+                                {payment.payment_method === 'CUSTOMER_CREDIT' ? 'Customer Credit' : payment.payment_method.replace(/_/g, ' ')}
                               </Badge>
                             </TableCell>
                             <TableCell className="font-semibold text-green-600 px-2 sm:px-4 whitespace-nowrap">
@@ -2654,22 +2684,23 @@ export default function Orders() {
                                 </Button>
                               </div>
                             </TableCell>
-                            {canCancelPayments && Number(payment.amount) > 0 && (
+                            {canCancelPayments && (
                               <TableCell className="px-2 sm:px-4">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs border-red-300 text-red-600 hover:bg-red-50"
-                                  onClick={() => {
-                                    setCancelPaymentTarget(payment);
-                                    setCancelPaymentReason('');
-                                  }}
-                                >
-                                  Cancel
-                                </Button>
+                                {payment.source_type !== 'CUSTOMER_CREDIT' && Number(payment.amount) > 0 ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs border-red-300 text-red-600 hover:bg-red-50"
+                                    onClick={() => {
+                                      setCancelPaymentTarget(payment);
+                                      setCancelPaymentReason('');
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                ) : <span className="text-xs text-muted-foreground">—</span>}
                               </TableCell>
                             )}
-                            {canCancelPayments && Number(payment.amount) <= 0 && <TableCell />}
                           </TableRow>
                         ))}
                         <TableRow className="bg-green-50 dark:bg-green-950 font-bold">
@@ -2758,14 +2789,7 @@ export default function Orders() {
                     className="border-yellow-600 text-yellow-800"
                     onClick={() => {
                       const totalAmt = parseFloat(String(selectedOrder.total_amount)) || 0;
-                      const paidAmt = parseFloat(String(selectedOrder.amount_paid)) || 0;
-                      const remaining = Math.max(0, totalAmt - paidAmt);
-                      setAdditionalPayment(remaining > 0 ? remaining : totalAmt);
-                      setPaymentMethod('CASH');
-                      setPaymentChannel('');
-                      setTransactionReference('');
-                      setPaymentDate(defaultPaymentYmd());
-                      setShowPaymentDialog(true);
+                      openAddPaymentDialog(selectedOrder, totalAmt);
                     }}
                   >
                     <CreditCard className="h-4 w-4 mr-2" />
@@ -3174,22 +3198,7 @@ export default function Orders() {
                   || Number(selectedOrder.amount_paid) <= 0
                   || paymentTransactions.length === 0) && (
                   <Button
-                    onClick={() => {
-                      const remaining = Math.max(
-                        0,
-                        parseFloat(String(selectedOrder.total_amount)) - parseFloat(String(selectedOrder.amount_paid))
-                      );
-                      setAdditionalPayment(
-                        remaining > 0
-                          ? remaining
-                          : parseFloat(String(selectedOrder.total_amount)) || 0
-                      );
-                      setPaymentMethod('CASH');
-                      setPaymentChannel('');
-                      setTransactionReference('');
-                      setPaymentDate(defaultPaymentYmd());
-                      setShowPaymentDialog(true);
-                    }}
+                    onClick={() => openAddPaymentDialog(selectedOrder)}
                     variant="default"
                   >
                     <CreditCard className="h-4 w-4 mr-2" />
@@ -3328,7 +3337,10 @@ export default function Orders() {
                   0,
                   parseFloat(String(selectedOrder.total_amount)) - parseFloat(String(selectedOrder.amount_paid))
                 );
-                const paymentExceedsBalance = additionalPayment > remainingDue + 0.009;
+                const creditLimit = Math.min(availableCustomerCredit, remainingDue);
+                const creditApplied = applyCustomerCredit ? customerCreditAmount : 0;
+                const cashLimit = Math.max(0, remainingDue - creditApplied);
+                const paymentExceedsBalance = additionalPayment + creditApplied > remainingDue + 0.009;
                 return (
                   <>
               <div className="p-4 bg-muted rounded-lg space-y-2">
@@ -3352,11 +3364,11 @@ export default function Orders() {
                   id="additional-payment"
                   type="number"
                   min="0"
-                  max={remainingDue}
+                  max={cashLimit}
                   value={additionalPayment || ''}
                   onChange={(e) => {
                     const next = parseFloat(e.target.value) || 0;
-                    setAdditionalPayment(Math.min(next, remainingDue));
+                    setAdditionalPayment(Math.min(next, cashLimit));
                   }}
                   placeholder="Enter amount"
                   className="mt-2"
@@ -3371,7 +3383,7 @@ export default function Orders() {
                       setAdditionalPayment(0);
                       window.setTimeout(() => document.getElementById('additional-payment')?.focus(), 0);
                     }}
-                    disabled={recordingPayment || remainingDue <= 0}
+                    disabled={recordingPayment || cashLimit <= 0}
                   >
                     Partial
                   </Button>
@@ -3379,8 +3391,8 @@ export default function Orders() {
                     type="button"
                     variant="link"
                     size="sm"
-                    onClick={() => setAdditionalPayment(remainingDue)}
-                    disabled={recordingPayment || remainingDue <= 0}
+                    onClick={() => setAdditionalPayment(cashLimit)}
+                    disabled={recordingPayment || cashLimit <= 0}
                   >
                     Pay Full Balance
                   </Button>
@@ -3391,6 +3403,39 @@ export default function Orders() {
                   </p>
                 )}
               </div>
+
+              {availableCustomerCredit > 0 && remainingDue > 0 && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+                  <div className="flex items-center gap-2">
+                    <Checkbox id="apply-credit-to-payment" checked={applyCustomerCredit} onCheckedChange={(checked) => {
+                      const enabled = !!checked;
+                      const nextCredit = enabled ? creditLimit : 0;
+                      setApplyCustomerCredit(enabled);
+                      setCustomerCreditAmount(nextCredit);
+                      if (enabled) setAdditionalPayment((current) => Math.min(current, Math.max(0, remainingDue - nextCredit)));
+                    }} disabled={recordingPayment} />
+                    <label htmlFor="apply-credit-to-payment" className="cursor-pointer text-sm leading-5">
+                      Apply customer credit ({formatUGX(availableCustomerCredit)} available)
+                    </label>
+                  </div>
+                  {applyCustomerCredit && (
+                    <div className="mt-2 pl-6">
+                      <Label htmlFor="payment-credit-amount" className="text-xs">Credit to apply (UGX)</Label>
+                      <Input id="payment-credit-amount" type="number" min="0" max={creditLimit} step="1"
+                        value={customerCreditAmount || ''}
+                        onChange={(event) => {
+                          const nextCredit = Math.min(Math.max(0, Number(event.target.value) || 0), creditLimit);
+                          setCustomerCreditAmount(nextCredit);
+                          setAdditionalPayment((current) => Math.min(current, Math.max(0, remainingDue - nextCredit)));
+                        }}
+                        className="mt-1 h-9" disabled={recordingPayment} />
+                      <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+                        Oldest customer deposits are applied first. You can combine credit with a new payment.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <Label htmlFor="payment-date">Payment Date</Label>
@@ -3458,20 +3503,21 @@ export default function Orders() {
                 </div>
               )}
 
-              {additionalPayment > 0 && (
+              {(additionalPayment > 0 || creditApplied > 0) && (
                 <div className="p-4 bg-primary/10 rounded-lg space-y-1">
                   <p className="text-sm font-medium">After this payment:</p>
                   <div className="flex justify-between text-sm">
                     <span>Total Paid:</span>
-                    <span>{formatUGX(parseFloat(String(selectedOrder.amount_paid)) + additionalPayment)}</span>
+                    <span>{formatUGX(parseFloat(String(selectedOrder.amount_paid)) + additionalPayment + creditApplied)}</span>
                   </div>
+                  {creditApplied > 0 && <div className="flex justify-between text-sm"><span>Customer credit applied:</span><span>{formatUGX(creditApplied)}</span></div>}
                   <div className="flex justify-between text-sm">
                     <span>Remaining Balance:</span>
-                    <span className={parseFloat(String(selectedOrder.total_amount)) - (parseFloat(String(selectedOrder.amount_paid)) + additionalPayment) <= 0 ? 'text-green-600 font-semibold' : ''}>
-                      {formatUGX(Math.max(0, parseFloat(String(selectedOrder.total_amount)) - (parseFloat(String(selectedOrder.amount_paid)) + additionalPayment)))}
+                    <span className={parseFloat(String(selectedOrder.total_amount)) - (parseFloat(String(selectedOrder.amount_paid)) + additionalPayment + creditApplied) <= 0 ? 'text-green-600 font-semibold' : ''}>
+                      {formatUGX(Math.max(0, parseFloat(String(selectedOrder.total_amount)) - (parseFloat(String(selectedOrder.amount_paid)) + additionalPayment + creditApplied)))}
                     </span>
                   </div>
-                  {parseFloat(String(selectedOrder.total_amount)) - (parseFloat(String(selectedOrder.amount_paid)) + additionalPayment) <= 0 && (
+                  {parseFloat(String(selectedOrder.total_amount)) - (parseFloat(String(selectedOrder.amount_paid)) + additionalPayment + creditApplied) <= 0 && (
                     <p className="text-sm text-green-600 font-semibold pt-2">✓ Order will be fully paid!</p>
                   )}
                 </div>
@@ -3489,7 +3535,7 @@ export default function Orders() {
                 <Button
                   onClick={handleUpdatePayment}
                   className="w-full sm:w-auto disabled:opacity-40 disabled:cursor-not-allowed"
-                  disabled={recordingPayment || additionalPayment <= 0 || paymentExceedsBalance || remainingDue <= 0}
+                  disabled={recordingPayment || (additionalPayment <= 0 && creditApplied <= 0) || paymentExceedsBalance || remainingDue <= 0}
                 >
                   {recordingPayment ? (
                     <>
@@ -3497,7 +3543,11 @@ export default function Orders() {
                       Recording…
                     </>
                   ) : (
-                    'Record Payment'
+                    creditApplied > 0 && additionalPayment > 0
+                      ? 'Record Payment & Apply Credit'
+                      : creditApplied > 0
+                        ? 'Apply Customer Credit'
+                        : 'Record Payment'
                   )}
                 </Button>
               </div>

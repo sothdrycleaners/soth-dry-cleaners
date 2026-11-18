@@ -37,11 +37,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
-  Search, Plus, Edit, Trash2, Eye, Phone, Mail, MapPin, 
+  Search, Plus, Edit, Trash2, Eye, Phone, Mail, MapPin, Wallet,
   ChevronLeft, ChevronRight, Users, Building2, MessageSquare, ShoppingBag, ExternalLink, AlertTriangle, AlertCircle
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatCustomerPhone } from "@/lib/phone";
+import { kampalaTodayYmd } from "@/lib/businessDate";
 
 /** Soft caps — keep optional fields free but bounded for storage/UI */
 const CUSTOMER_LIMITS = {
@@ -137,6 +138,14 @@ export default function Customers() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deleteConfirmStep, setDeleteConfirmStep] = useState<1 | 2>(1);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerCreditBalance, setCustomerCreditBalance] = useState(0);
+  const [creditTransactions, setCreditTransactions] = useState<any[]>([]);
+  const [isDepositDialogOpen, setIsDepositDialogOpen] = useState(false);
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositMethod, setDepositMethod] = useState('CASH');
+  const [depositDate, setDepositDate] = useState(kampalaTodayYmd());
+  const [depositReference, setDepositReference] = useState('');
+  const [savingDeposit, setSavingDeposit] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<CustomerOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [orderHistoryPage, setOrderHistoryPage] = useState(1);
@@ -162,6 +171,20 @@ export default function Customers() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const phoneCheckRef = useRef(0);
   const nameCheckRef = useRef(0);
+
+  const loadCustomerCredit = useCallback(async (customerId: number) => {
+    if (!token) return;
+    const response = await axios.get(`${API_BASE_URL}/customers/${customerId}/credit`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setCustomerCreditBalance(Math.max(0, Number(response.data.available_credit) || 0));
+    setCreditTransactions(Array.isArray(response.data.transactions) ? response.data.transactions : []);
+  }, [token]);
+
+  useEffect(() => {
+    if (!isViewDialogOpen || !selectedCustomer) return;
+    loadCustomerCredit(selectedCustomer.id).catch((error) => console.error('Failed to load customer credit:', error));
+  }, [isViewDialogOpen, selectedCustomer?.id, loadCustomerCredit]);
 
   // Handle search from navigation state
   useEffect(() => {
@@ -610,6 +633,35 @@ export default function Customers() {
       toast.error('Failed to load order details');
     } finally {
       setLoadingOrderDetails(false);
+    }
+  };
+
+  const handleRecordDeposit = async () => {
+    if (!selectedCustomer || !token || savingDeposit) return;
+    const amount = Number(depositAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Enter a deposit amount greater than zero');
+      return;
+    }
+    setSavingDeposit(true);
+    try {
+      const response = await axios.post(`${API_BASE_URL}/customers/${selectedCustomer.id}/credit/deposits`, {
+        amount,
+        payment_method: depositMethod,
+        payment_date: depositDate || undefined,
+        transaction_reference: depositReference.trim() || undefined,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      setCustomerCreditBalance(Number(response.data.available_credit) || 0);
+      setDepositAmount('');
+      setDepositReference('');
+      setIsDepositDialogOpen(false);
+      await loadCustomerCredit(selectedCustomer.id);
+      toast.success('Customer deposit recorded as account credit');
+    } catch (error) {
+      const message = (error as AxiosError<{ error?: string }>).response?.data?.error;
+      toast.error(message || 'Failed to record customer deposit');
+    } finally {
+      setSavingDeposit(false);
     }
   };
 
@@ -1282,6 +1334,35 @@ export default function Customers() {
                   <p className="font-medium">{formatUGX(selectedCustomer.total_spent)}</p>
                 </div>
               )}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground"><Wallet className="h-4 w-4" /> Available customer credit</p>
+                    <p className="text-xl font-semibold text-emerald-700 dark:text-emerald-300">{formatUGX(customerCreditBalance)}</p>
+                  </div>
+                  <Button onClick={() => {
+                    setDepositAmount('');
+                    setDepositMethod('CASH');
+                    setDepositDate(kampalaTodayYmd());
+                    setDepositReference('');
+                    setIsDepositDialogOpen(true);
+                  }}><Plus className="mr-2 h-4 w-4" />Record Deposit</Button>
+                </div>
+                {creditTransactions.length > 0 && (
+                  <div className="mt-3 space-y-2 border-t border-emerald-200 pt-3 dark:border-emerald-900">
+                    <p className="text-xs font-semibold text-muted-foreground">Recent account activity</p>
+                    {creditTransactions.slice(0, 8).map((entry) => (
+                      <div key={entry.id} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="min-w-0 truncate">
+                          {String(entry.entry_type).replace(/_/g, ' ')}{entry.order_number ? ` · ${entry.order_number}` : ''} · {new Date(entry.payment_date).toLocaleDateString()}
+                          {entry.remaining_amount != null && <span className="block text-muted-foreground">Remaining from this deposit: {formatUGX(entry.remaining_amount)}</span>}
+                        </span>
+                        <span className={Number(entry.amount) >= 0 ? 'shrink-0 font-medium text-emerald-700' : 'shrink-0 font-medium text-foreground'}>{Number(entry.amount) >= 0 ? '+' : '−'}{formatUGX(Math.abs(Number(entry.amount)))}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">Created</p>
@@ -1427,6 +1508,25 @@ export default function Customers() {
             <Button variant="outline" className="w-full sm:w-auto" onClick={() => setIsViewDialogOpen(false)}>
               Close
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDepositDialogOpen} onOpenChange={setIsDepositDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record Customer Deposit</DialogTitle>
+            <DialogDescription>Record money received in advance for {selectedCustomer?.name}. It stays as customer credit until used on an order.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2"><Label htmlFor="credit-deposit-amount">Deposit amount (UGX)</Label><Input id="credit-deposit-amount" type="number" min="1" value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} placeholder="Enter amount received" /></div>
+            <div className="space-y-2"><Label>Payment method</Label><Select value={depositMethod} onValueChange={setDepositMethod}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="CASH">Cash</SelectItem><SelectItem value="MOBILE_MONEY_MTN">MTN MoMo</SelectItem><SelectItem value="MOBILE_MONEY_AIRTEL">Airtel Pay</SelectItem><SelectItem value="BANK_TRANSFER">Bank transfer</SelectItem></SelectContent></Select></div>
+            <div className="space-y-2"><Label htmlFor="credit-deposit-date">Date received</Label><Input id="credit-deposit-date" type="date" max={kampalaTodayYmd()} value={depositDate} onChange={(event) => setDepositDate(event.target.value)} /></div>
+            <div className="space-y-2"><Label htmlFor="credit-deposit-reference">Transaction reference (optional)</Label><Input id="credit-deposit-reference" value={depositReference} onChange={(event) => setDepositReference(event.target.value)} maxLength={255} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={savingDeposit} onClick={() => setIsDepositDialogOpen(false)}>Cancel</Button>
+            <Button disabled={savingDeposit || !depositAmount || Number(depositAmount) <= 0} onClick={handleRecordDeposit}>{savingDeposit ? 'Recording?' : 'Record Deposit'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

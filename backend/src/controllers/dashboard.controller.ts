@@ -464,26 +464,39 @@ export const getDailyCollections = async (req: AuthRequest, res: Response) => {
 
     // Get all payments for the day
     const paymentsResult = await query(
-      `SELECT 
-        p.payment_method,
-        COUNT(*) as transaction_count,
-        COALESCE(SUM(p.amount), 0) as total_amount,
-        u.full_name as collected_by
-       FROM payments p
-       LEFT JOIN users u ON p.created_by = u.id
-       WHERE p.payment_date >= $1 AND p.payment_date < $2
-       GROUP BY p.payment_method, u.full_name
+      `SELECT method AS payment_method, SUM(transaction_count)::bigint AS transaction_count,
+              SUM(total_amount) AS total_amount, collected_by
+       FROM (
+         SELECT p.payment_method AS method, COUNT(*) AS transaction_count,
+                COALESCE(SUM(p.amount), 0) AS total_amount, u.full_name AS collected_by
+         FROM payments p LEFT JOIN users u ON p.created_by = u.id
+         WHERE p.payment_date >= $1 AND p.payment_date < $2
+           AND COALESCE(p.is_cancelled, FALSE) = FALSE
+         GROUP BY p.payment_method, u.full_name
+         UNION ALL
+         SELECT ct.payment_method AS method, COUNT(*) AS transaction_count,
+                COALESCE(SUM(ct.amount), 0) AS total_amount, u.full_name AS collected_by
+         FROM customer_credit_transactions ct LEFT JOIN users u ON ct.created_by = u.id
+         WHERE ct.payment_date >= $1 AND ct.payment_date < $2
+           AND ct.entry_type IN ('DEPOSIT', 'ORDER_OVERPAYMENT')
+         GROUP BY ct.payment_method, u.full_name
+       ) receipts
+       GROUP BY method, collected_by
        ORDER BY total_amount DESC`,
       [date, nextDay]
     );
 
     // Get daily summary
     const summaryResult = await query(
-      `SELECT 
-        COUNT(*) as total_transactions,
-        COALESCE(SUM(amount), 0) as total_collected
-       FROM payments
-       WHERE payment_date >= $1 AND payment_date < $2`,
+      `SELECT
+         (SELECT COUNT(*) FROM payments WHERE payment_date >= $1 AND payment_date < $2
+           AND COALESCE(is_cancelled, FALSE) = FALSE)
+         + (SELECT COUNT(*) FROM customer_credit_transactions WHERE payment_date >= $1 AND payment_date < $2
+           AND entry_type IN ('DEPOSIT', 'ORDER_OVERPAYMENT')) AS total_transactions,
+         (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE payment_date >= $1 AND payment_date < $2
+           AND COALESCE(is_cancelled, FALSE) = FALSE)
+         + (SELECT COALESCE(SUM(amount), 0) FROM customer_credit_transactions WHERE payment_date >= $1 AND payment_date < $2
+           AND entry_type IN ('DEPOSIT', 'ORDER_OVERPAYMENT')) AS total_collected`,
       [date, nextDay]
     );
 

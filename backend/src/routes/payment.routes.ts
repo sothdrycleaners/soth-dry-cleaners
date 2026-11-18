@@ -21,7 +21,8 @@ router.get('/order/:orderId', paymentController.getPaymentsByOrder as any);
 router.post(
   '/order/:orderId',
   [
-    body('amount').isFloat({ min: 0.01 }).withMessage('Payment amount must be greater than zero'),
+    body('amount').optional().isFloat({ min: 0 }).withMessage('Payment amount cannot be negative'),
+    body('customer_credit_amount').optional().isFloat({ min: 0 }).withMessage('Customer credit amount cannot be negative'),
     body('payment_method').optional().isString(),
     body('payment_date').optional().isString(),
     body('transaction_reference').optional({ nullable: true }).isString(),

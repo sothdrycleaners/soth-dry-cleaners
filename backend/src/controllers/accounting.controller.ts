@@ -93,6 +93,13 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
       FROM payments p JOIN orders o ON p.order_id = o.id
       ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = FALSE')}
     `);
+    const creditApplicationRevenueResult = await query(`
+      SELECT COALESCE(SUM(-ct.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
+        THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END), 0) AS applied_revenue
+      FROM customer_credit_transactions ct JOIN orders o ON o.id = ct.order_id
+      ${appendFilter(paymentDateFilter.replace(/\bp\./g, 'ct.'), "ct.entry_type = 'APPLICATION'")}
+    `);
+
     const cashActivityResult = await query(`
       SELECT
         COALESCE(SUM(p.amount) FILTER (WHERE COALESCE(p.is_refund, FALSE) = FALSE), 0) AS total_payments,
@@ -102,18 +109,27 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
       ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE')}
     `);
 
-    // Revenue by service category (only counting actual payments, not refunds)
+    // Attribute cash payments and previously received customer credit to
+    // service categories using the order's item-value proportions.
     const revenueByCategoryResult = await query(`
-      WITH paid_lines AS (
-        SELECT pi.category, o.id AS order_id,
-          p.amount * CASE WHEN COALESCE(o.total_amount, 0) > 0
-            THEN (o.total_amount - COALESCE(o.tax_amount, 0)) / o.total_amount ELSE 1 END AS net_payment,
-          oi.total_price / NULLIF(SUM(oi.total_price) OVER (PARTITION BY p.id), 0) AS line_share
-        FROM payments p
-        JOIN orders o ON p.order_id = o.id
-        JOIN order_items oi ON o.id = oi.order_id
+      WITH revenue_transactions AS (
+        SELECT p.id::text AS transaction_id, p.amount AS amount, o.id AS order_id,
+               o.total_amount, o.tax_amount
+        FROM payments p JOIN orders o ON o.id = p.order_id
+        ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE AND COALESCE(p.is_refund, FALSE) = FALSE')}
+        UNION ALL
+        SELECT ('credit-' || ct.id::text) AS transaction_id, -ct.amount AS amount,
+               o.id AS order_id, o.total_amount, o.tax_amount
+        FROM customer_credit_transactions ct JOIN orders o ON o.id = ct.order_id
+        ${appendFilter(paymentDateFilter.replace(/p\./g, 'ct.'), "ct.entry_type = 'APPLICATION'")}
+      ), paid_lines AS (
+        SELECT pi.category, rt.order_id,
+          rt.amount * CASE WHEN COALESCE(rt.total_amount, 0) > 0
+            THEN (rt.total_amount - COALESCE(rt.tax_amount, 0)) / rt.total_amount ELSE 1 END AS net_payment,
+          oi.total_price / NULLIF(SUM(oi.total_price) OVER (PARTITION BY rt.transaction_id), 0) AS line_share
+        FROM revenue_transactions rt
+        JOIN order_items oi ON rt.order_id = oi.order_id
         JOIN price_items pi ON oi.price_item_id = pi.id
-        ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE')}
       )
       SELECT category, ROUND(COALESCE(SUM(net_payment * line_share), 0)) AS revenue,
              COUNT(DISTINCT order_id) AS order_count
@@ -162,7 +178,9 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
 
     const totalPayments = Number(cashActivityResult.rows[0].total_payments) || 0;
     const totalRefunds = Number(cashActivityResult.rows[0].total_refunds) || 0;
-    const netRevenue = (Number(revenueResult.rows[0].earned_revenue) || 0) - totalRefunds;
+    const netRevenue = (Number(revenueResult.rows[0].earned_revenue) || 0)
+      + (Number(creditApplicationRevenueResult.rows[0].applied_revenue) || 0)
+      - totalRefunds;
     const totalExpenses = parseFloat(totalExpensesResult.rows[0].total_expenses);
     const totalSalaries = parseFloat(salariesResult.rows[0].total_salaries);
     // Direct service costs are not currently posted to a COGS ledger. Keep
@@ -191,7 +209,7 @@ export const getIncomeStatement = async (req: AuthRequest, res: Response) => {
 
     res.json({
       period: period || `${from_date} to ${to_date}`,
-      revenue_basis: 'net_cash_payments_by_payment_date_excluding_vat_less_refunds',
+      revenue_basis: 'cash payments plus applied customer credit by transaction date, net of VAT and refunds; unapplied deposits remain liabilities',
       cost_of_goods_sold_basis: 'not_separately_tracked',
       revenue: {
         total: netRevenue, // UI + exports expect revenue.total
@@ -247,6 +265,10 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
           FROM payments p
           WHERE p.order_id = o.id AND COALESCE(p.is_cancelled, FALSE) = FALSE
             AND p.payment_date < ($1::date + INTERVAL '1 day')
+        ), 0) - COALESCE((
+          SELECT SUM(-ct.amount) FROM customer_credit_transactions ct
+          WHERE ct.order_id = o.id AND ct.entry_type = 'APPLICATION'
+            AND ct.payment_date < ($1::date + INTERVAL '1 day')
         ), 0)
       )), 0) as accounts_receivable
       FROM orders o
@@ -267,6 +289,9 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
         COALESCE((SELECT SUM(p.amount) FROM payments p
           WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
             AND p.payment_date < ($1::date + INTERVAL '1 day')), 0)
+        + COALESCE((SELECT SUM(ct.amount) FROM customer_credit_transactions ct
+          WHERE ct.entry_type IN ('DEPOSIT', 'ORDER_OVERPAYMENT')
+            AND ct.payment_date < ($1::date + INTERVAL '1 day')), 0)
         - COALESCE((SELECT SUM(e.amount) FROM expenses e
           WHERE e.expense_date <= $1
             AND COALESCE(e.status, e.approval_status) = 'APPROVED'
@@ -291,7 +316,10 @@ export const getBalanceSheet = async (req: AuthRequest, res: Response) => {
         SELECT SUM(p.amount) FROM payments p
         WHERE p.order_id = o.id AND COALESCE(p.is_cancelled, FALSE) = FALSE
           AND p.payment_date < ($1::date + INTERVAL '1 day')
-      ), 0))), 0) AS customer_advances
+      ), 0))), 0)
+      + COALESCE((SELECT SUM(ct.amount) FROM customer_credit_transactions ct
+        WHERE ct.payment_date < ($1::date + INTERVAL '1 day')), 0)
+      AS customer_advances
       FROM orders o
       WHERE (o.delivered_at IS NULL OR o.delivered_at >= ($1::date + INTERVAL '1 day'))
         AND o.status <> 'cancelled'
@@ -405,10 +433,14 @@ export const getCashFlowStatement = async (req: AuthRequest, res: Response) => {
     const paymentDateFilter = dateFilter
       .replace(/created_at/g, 'p.payment_date')
       .replace(/WHERE p\.payment_date <=/g, 'WHERE p.payment_date <=');
+    const creditDateFilter = dateFilter.replace(/created_at/g, 'ct.payment_date');
     const cashFromCustomersResult = await query(`
-      SELECT COALESCE(SUM(p.amount), 0) AS cash_from_customers
-      FROM payments p JOIN orders o ON o.id = p.order_id
-      ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE')}
+      SELECT
+        COALESCE((SELECT SUM(p.amount) FROM payments p JOIN orders o ON o.id = p.order_id
+          ${appendFilter(paymentDateFilter, 'COALESCE(p.is_cancelled, FALSE) = FALSE')}), 0)
+        + COALESCE((SELECT SUM(ct.amount) FROM customer_credit_transactions ct
+          ${appendFilter(creditDateFilter, "ct.entry_type IN ('DEPOSIT', 'ORDER_OVERPAYMENT')")}), 0)
+        AS cash_from_customers
     `);
 
     const cashForExpensesResult = await query(`
@@ -515,6 +547,9 @@ export const getTrialBalance = async (req: AuthRequest, res: Response) => {
         COALESCE((SELECT SUM(p.amount) FROM payments p
           WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
             AND p.payment_date < ($1::date + INTERVAL '1 day')), 0)
+        + COALESCE((SELECT SUM(ct.amount) FROM customer_credit_transactions ct
+          WHERE ct.entry_type IN ('DEPOSIT', 'ORDER_OVERPAYMENT')
+            AND ct.payment_date < ($1::date + INTERVAL '1 day')), 0)
         - COALESCE((SELECT SUM(e.amount) FROM expenses e
           WHERE e.expense_date <= $1 AND COALESCE(e.status, e.approval_status) = 'APPROVED'
             AND COALESCE(e.category, '') <> 'Salaries'), 0)
@@ -527,6 +562,18 @@ export const getTrialBalance = async (req: AuthRequest, res: Response) => {
       WHERE COALESCE(p.is_cancelled, FALSE) = FALSE
         AND p.payment_date < ($1::date + INTERVAL '1 day')
     `, [as_of_date]);
+    const customerAdvancesResult = await query(`
+      SELECT
+        COALESCE((SELECT SUM(GREATEST(0, COALESCE((SELECT SUM(p.amount) FROM payments p
+          WHERE p.order_id = o.id AND COALESCE(p.is_cancelled, FALSE) = FALSE
+            AND p.payment_date < ($1::date + INTERVAL '1 day')), 0)))
+          FROM orders o
+          WHERE (o.delivered_at IS NULL OR o.delivered_at >= ($1::date + INTERVAL '1 day'))
+            AND o.status <> 'cancelled' AND o.created_at < ($1::date + INTERVAL '1 day')), 0)
+        + COALESCE((SELECT SUM(ct.amount) FROM customer_credit_transactions ct
+          WHERE ct.payment_date < ($1::date + INTERVAL '1 day')), 0)
+        AS balance
+    `, [as_of_date]);
 
     const cashMovement = Number(cashResult.rows[0].balance) || 0;
     const netRevenueBalance = Number(revenueResult.rows[0].balance) || 0;
@@ -535,6 +582,7 @@ export const getTrialBalance = async (req: AuthRequest, res: Response) => {
       { account_code: '1100', account_name: 'Cash / net cash movement', debit: Math.max(0, cashMovement), credit: Math.max(0, -cashMovement) },
       { account_code: '4000', account_name: 'Revenue - Laundry Services', debit: 0, credit: netRevenueBalance },
       { account_code: '2100', account_name: vatBalance >= 0 ? 'VAT collected (payable)' : 'VAT adjustment (receivable)', debit: Math.max(0, -vatBalance), credit: Math.max(0, vatBalance) },
+      { account_code: '2200', account_name: 'Customer advances / unearned receipts', debit: 0, credit: Number(customerAdvancesResult.rows[0].balance) || 0 },
     ];
 
     // Add expenses by category
@@ -692,6 +740,8 @@ export const getFinancialRatios = async (req: AuthRequest, res: Response) => {
       SELECT
         (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
          WHERE COALESCE(p.is_cancelled, FALSE) = FALSE) +
+        (SELECT COALESCE(SUM(ct.amount), 0) FROM customer_credit_transactions ct
+         WHERE ct.entry_type IN ('DEPOSIT', 'ORDER_OVERPAYMENT')) +
         (SELECT COALESCE(SUM(GREATEST(0, COALESCE(o.total_amount, o.total, 0) - COALESCE(o.amount_paid, 0))), 0)
          FROM orders o WHERE o.status = 'delivered' AND o.payment_status IN ('UNPAID', 'PARTIAL')) AS assets
     `);

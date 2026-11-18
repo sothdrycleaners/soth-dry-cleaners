@@ -331,6 +331,10 @@ export default function NewOrder() {
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY_MTN' | 'MOBILE_MONEY_AIRTEL' | 'BANK_TRANSFER' | 'ON_ACCOUNT'>('ON_ACCOUNT');
   const [transactionRef, setTransactionRef] = useState('');
   const [amountPaid, setAmountPaid] = useState(0);
+  const [availableCustomerCredit, setAvailableCustomerCredit] = useState(0);
+  const [applyCustomerCredit, setApplyCustomerCredit] = useState(false);
+  const [customerCreditAmount, setCustomerCreditAmount] = useState(0);
+  const [keepExcessAsCredit, setKeepExcessAsCredit] = useState(false);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [invoiceDownloadOrderId, setInvoiceDownloadOrderId] = useState<number | null>(null);
@@ -1003,36 +1007,55 @@ export default function NewOrder() {
   const subtotalAfterDiscount = Math.max(0, itemsSubtotal - discountAmount - safeBargain + safeOrderSurcharge);
   const taxAmount = vatApplies ? Math.round((subtotalAfterDiscount * VAT_RATE) / 100) : 0;
   const total = subtotalAfterDiscount + taxAmount;
-  const balance = Math.max(0, total - amountPaid);
+  const creditAppliedPreview = applyCustomerCredit ? Math.min(customerCreditAmount, availableCustomerCredit, total) : 0;
+  const cashDueAfterCredit = Math.max(0, total - creditAppliedPreview);
+  const cashAppliedPreview = Math.min(amountPaid, cashDueAfterCredit);
+  const excessCreditPreview = Math.max(0, amountPaid - cashDueAfterCredit);
+  const settledAmountPreview = creditAppliedPreview + cashAppliedPreview;
+  const balance = Math.max(0, total - settledAmountPreview);
   
   // For backward compatibility
   const subtotal = itemsSubtotal;
 
-  // Auto-update payment status based on amount paid and method
+  // Derive payment state from cash assigned to the order and any applied advance.
   useEffect(() => {
-    if (paymentMethod === 'ON_ACCOUNT') {
-      // ON_ACCOUNT always = UNPAID, zero amount
+    if (paymentMethod === 'ON_ACCOUNT' && creditAppliedPreview <= 0) {
       setPaymentStatus('UNPAID');
       if (amountPaid !== 0) setAmountPaid(0);
       return;
     }
-    // For cash/mm/bt: derive status from amount
-    if (amountPaid === 0) {
-      // Keep a deliberate Partial selection visible until a positive amount is entered.
+    if (settledAmountPreview <= 0) {
       if (paymentStatus !== 'PARTIAL') setPaymentStatus('UNPAID');
-    } else if (amountPaid >= total && total > 0) {
+    } else if (settledAmountPreview >= total && total > 0) {
       setPaymentStatus('PAID');
     } else {
       setPaymentStatus('PARTIAL');
     }
-  }, [amountPaid, total, paymentMethod, paymentStatus]);
+  }, [amountPaid, total, paymentMethod, paymentStatus, creditAppliedPreview, settledAmountPreview]);
+
+  useEffect(() => {
+    let active = true;
+    setAvailableCustomerCredit(0);
+    setApplyCustomerCredit(false);
+    setCustomerCreditAmount(0);
+    setKeepExcessAsCredit(false);
+    if (!selectedCustomer || !token) return;
+    axios.get(`${API_BASE_URL}/customers/${selectedCustomer.id}/credit`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((response) => {
+      if (!active) return;
+      const credit = Math.max(0, Number(response.data.available_credit) || 0);
+      setAvailableCustomerCredit(credit);
+    }).catch((error) => console.error('Failed to load customer credit:', error));
+    return () => { active = false; };
+  }, [selectedCustomer?.id, token]);
 
   /**
    * When user types an amount > 0 while ON_ACCOUNT is selected,
    * automatically switch to CASH so they don't have to manually change the method.
    */
   const handleAmountPaidChange = (raw: number) => {
-    const value = total > 0 ? Math.min(raw, total) : raw;
+    const value = Math.max(0, Math.min(raw, 100000000000));
     if (value > 0 && paymentMethod === 'ON_ACCOUNT') {
       setPaymentMethod('CASH');
     }
@@ -1050,6 +1073,9 @@ export default function NewOrder() {
     if (!modeIsSaved) {
       setPaymentMethod('ON_ACCOUNT');
       setAmountPaid(0);
+    setAvailableCustomerCredit(0);
+    setApplyCustomerCredit(false);
+    setKeepExcessAsCredit(false);
       setPaymentStatus('UNPAID');
     }
   }, [paymentMethod, availablePaymentModes.mtn_code, availablePaymentModes.airtel_merchant, availablePaymentModes.centenary_account]);
@@ -1148,6 +1174,9 @@ export default function NewOrder() {
     setPaymentMethod('ON_ACCOUNT');
     setTransactionRef('');
     setAmountPaid(0);
+    setAvailableCustomerCredit(0);
+    setApplyCustomerCredit(false);
+    setKeepExcessAsCredit(false);
     setNotes('');
     setItemSearch('');
     setUseBackdate(false);
@@ -1242,13 +1271,15 @@ export default function NewOrder() {
         total_amount: total,
         payment_status: paymentStatus,
         payment_method: paymentMethod,
-        amount_paid: Math.min(amountPaid, total),
+        amount_paid: amountPaid,
+        customer_credit_amount: creditAppliedPreview,
+        keep_excess_as_credit: keepExcessAsCredit,
         transaction_reference: transactionRef || null,
         notes,
         branch_id: selectedBranchId ? Number(selectedBranchId) : undefined,
         ...(canBackdate && useBackdate ? { order_date: orderDate } : {}),
-        historical_payment: historicalPayment && amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT',
-        ...(historicalPayment && amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT'
+        historical_payment: historicalPayment && ((amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT') || creditAppliedPreview > 0),
+        ...(historicalPayment && ((amountPaid > 0 && paymentMethod !== 'ON_ACCOUNT') || creditAppliedPreview > 0)
           ? { payment_date: historicalPaymentDate }
           : {}),
       };
@@ -1315,6 +1346,7 @@ export default function NewOrder() {
           tax_amount: Number(order.tax_amount ?? taxAmount),
           total_amount: Number(order.total_amount ?? total),
           amount_paid: Number(order.amount_paid ?? Math.min(amountPaid, total)),
+          credit_applied: creditAppliedPreview,
           balance: Number(order.balance ?? Math.max(0, total - Math.min(amountPaid, total))),
           payment_status: order.payment_status || paymentStatus,
           payment_method: order.payment_method || orderData.payment_method,
@@ -2055,11 +2087,10 @@ export default function NewOrder() {
                   </div>
                 )}
                 <div className="col-span-2 lg:col-span-1">
-                  <Label className="text-xs text-muted-foreground">Amount Paid</Label>
+                  <Label className="text-xs text-muted-foreground">Amount Received</Label>
                   <Input
                     type="number"
                     min="0"
-                    max={total > 0 ? total : undefined}
                     value={amountPaid || ''}
                     onChange={(e) => handleAmountPaidChange(parseFloat(e.target.value) || 0)}
                     placeholder="Enter amount…"
@@ -2150,7 +2181,7 @@ export default function NewOrder() {
                         type="button"
                         onClick={() => {
                           setPaymentStatus(value);
-                          if (value === 'PAID' && total > 0) setAmountPaid(total);
+                          if (value === 'PAID' && total > 0) setAmountPaid(cashDueAfterCredit);
                           else if (value === 'PARTIAL') setAmountPaid(0);
                         }}
                         className={cn(
@@ -2173,8 +2204,53 @@ export default function NewOrder() {
                 </div>
               )}
 
+              {selectedCustomer && availableCustomerCredit > 0 && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950/30">
+                  <div className="flex items-start gap-2">
+                    <Checkbox id="apply-customer-credit" checked={applyCustomerCredit} onCheckedChange={(checked) => {
+                      const enabled = !!checked;
+                      setApplyCustomerCredit(enabled);
+                      setCustomerCreditAmount(enabled ? Math.min(availableCustomerCredit, total) : 0);
+                    }} />
+                    <label htmlFor="apply-customer-credit" className="text-xs leading-5 cursor-pointer">
+                      Apply customer credit ({formatUGX(availableCustomerCredit)} available)
+                    </label>
+                  </div>
+                  {applyCustomerCredit && (
+                    <div className="mt-2 pl-6">
+                      <Label htmlFor="customer-credit-amount" className="text-xs">Credit to apply (UGX)</Label>
+                      <Input id="customer-credit-amount" type="number" min="0" max={Math.min(availableCustomerCredit, total)} step="1"
+                        value={customerCreditAmount || ''}
+                        onChange={(event) => setCustomerCreditAmount(Math.min(Math.max(0, Number(event.target.value) || 0), availableCustomerCredit, total))}
+                        disabled={loading} className="mt-1 h-9" />
+                      <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+                        {creditAppliedPreview > 0 ? `Applying ${formatUGX(creditAppliedPreview)}. Oldest deposits are used first.` : 'Enter the amount to use on this order.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {excessCreditPreview > 0 && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-900 dark:bg-amber-950/30">
+                  <div className="flex items-start gap-2">
+                    <Checkbox id="keep-excess-credit" checked={keepExcessAsCredit} onCheckedChange={(checked) => setKeepExcessAsCredit(!!checked)} />
+                    <label htmlFor="keep-excess-credit" className="text-xs leading-5 cursor-pointer">
+                      Keep {formatUGX(excessCreditPreview)} excess as customer credit
+                      <span className="block text-muted-foreground">The order is settled only up to its total; the excess remains on the customer account.</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+              {settledAmountPreview > 0 && (
+                <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs">
+                  <span className="text-muted-foreground">Cash applied to order</span><span className="text-right font-medium">{formatUGX(cashAppliedPreview)}</span>
+                  <span className="text-muted-foreground">Customer credit applied</span><span className="text-right font-medium">{formatUGX(creditAppliedPreview)}</span>
+                  {excessCreditPreview > 0 && <><span className="text-muted-foreground">New account credit</span><span className="text-right font-semibold text-emerald-700">{formatUGX(excessCreditPreview)}</span></>}
+                </div>
+              )}
+
               {/* On Account status indicator */}
-              {paymentMethod === 'ON_ACCOUNT' && (
+              {paymentMethod === 'ON_ACCOUNT' && balance > 0 && (
                 <div className="flex items-center gap-2 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-3 py-2">
                   <span className="text-sm">📋</span>
                   <div className="text-xs text-blue-800 dark:text-blue-300">
@@ -2259,7 +2335,7 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {paymentMethod !== 'ON_ACCOUNT' && (
+              {(paymentMethod !== 'ON_ACCOUNT' || creditAppliedPreview > 0) && (
                 <div className="border border-dashed border-blue-400 rounded-lg px-3 py-2 bg-blue-50 dark:bg-blue-950/30">
                   <div className="flex items-center gap-2">
                     <Checkbox id="historical-payment-create" checked={historicalPayment}
@@ -2288,7 +2364,7 @@ export default function NewOrder() {
               <Button
                 className="w-full h-12 text-base font-bold bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                 onClick={handleCreateOrder}
-                disabled={loading || !selectedCustomer || orderItems.length === 0 || (paymentStatus === 'PARTIAL' && amountPaid <= 0)}
+                disabled={loading || !selectedCustomer || orderItems.length === 0 || (paymentStatus === 'PARTIAL' && settledAmountPreview <= 0) || (excessCreditPreview > 0 && !keepExcessAsCredit)}
               >
                 {loading ? (
                   <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Creating order...</>
