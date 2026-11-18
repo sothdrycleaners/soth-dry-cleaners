@@ -125,29 +125,29 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     // CANCELLED - Filter by period (orders cancelled in selected timeframe) - use updated_at
     
     const pendingOrdersResult = await query(
-      `SELECT COUNT(*) as count FROM orders WHERE status = 'pending' ${branchOrderAnd}`
+      `SELECT COUNT(*) as count FROM orders WHERE UPPER(status::text) = 'PENDING' ${branchOrderAnd}`
     );
 
     const processingOrdersResult = await query(
-      `SELECT COUNT(*) as count FROM orders WHERE status = 'processing' ${branchOrderAnd}`
+      `SELECT COUNT(*) as count FROM orders WHERE UPPER(status::text) = 'PROCESSING' ${branchOrderAnd}`
     );
 
     const readyOrdersResult = await query(
-      `SELECT COUNT(*) as count FROM orders WHERE status = 'ready' ${branchOrderAnd}`
+      `SELECT COUNT(*) as count FROM orders WHERE UPPER(status::text) = 'READY' ${branchOrderAnd}`
     );
 
     // DELIVERED - filtered by the actual delivery recognition date.
     const deliveredOrdersResult = await query(
       `SELECT COUNT(*) as count FROM orders 
        ${deliveredAtDateFilter}
-       ${deliveredAtDateFilter ? 'AND' : 'WHERE'} status = 'delivered'`
+       ${deliveredAtDateFilter ? 'AND' : 'WHERE'} UPPER(status::text) = 'DELIVERED'`
     );
 
     // CANCELLED - filtered by period (when they were marked cancelled via updated_at)
     const cancelledOrdersResult = await query(
       `SELECT COUNT(*) as count FROM orders 
        ${updatedAtDateFilter}
-       ${updatedAtDateFilter ? 'AND' : 'WHERE'} status = 'cancelled'`
+       ${updatedAtDateFilter ? 'AND' : 'WHERE'} UPPER(status::text) = 'CANCELLED'`
     );
 
     // Payment transactions count for selected period
