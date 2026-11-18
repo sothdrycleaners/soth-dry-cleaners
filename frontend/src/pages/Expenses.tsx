@@ -975,7 +975,7 @@ const Expenses = () => {
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
               <div>
-                {(isAdmin || isManager) && <div className="mb-2 flex items-center gap-2">
+                <div className="mb-2 flex items-center gap-2">
                   <Checkbox id="historical-expense" checked={formData.historical_entry}
                     onCheckedChange={(checked) => {
                       const enabled = Boolean(checked);
@@ -983,7 +983,7 @@ const Expenses = () => {
                         expense_date: enabled ? (() => { const d = new Date(); d.setDate(d.getDate() - 1); return getLocalDateString(d); })() : getLocalDateString() });
                     }} />
                   <Label htmlFor="historical-expense">Record a historical expense</Label>
-                </div>}
+                </div>
                 <Label htmlFor="expense_date">{formData.historical_entry ? 'Expense Date *' : 'Expense Date (today)'}</Label>
                 {formData.historical_entry ? <Input id="expense_date" type="date" max={getLocalDateString()}
                   value={formData.expense_date} onChange={(e) => setFormData({ ...formData, expense_date: e.target.value })} required />

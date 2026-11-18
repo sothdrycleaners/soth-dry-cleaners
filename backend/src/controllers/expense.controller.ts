@@ -63,9 +63,6 @@ export const recordExpense = async (req: AuthRequest, res: Response) => {
     if (requestedExpenseDate < todayYmd && !isHistoricalEntry) {
       return res.status(400).json({ error: 'Enable historical entry to record an expense dated before today.' });
     }
-    if (isHistoricalEntry && req.user?.role !== 'ADMIN' && req.user?.role !== 'MANAGER') {
-      return res.status(403).json({ error: 'Only administrators and managers can record a historical expense.' });
-    }
     if (isHistoricalEntry && requestedExpenseDate >= todayYmd) {
       return res.status(400).json({ error: 'Choose a date earlier than today for a historical expense.' });
     }
@@ -349,9 +346,6 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
     }
     if (nextExpenseDate < todayYmd && !historicalEntry) {
       return res.status(400).json({ error: 'Enable historical entry to use an expense date before today.' });
-    }
-    if (historicalEntry && user.role !== 'ADMIN' && user.role !== 'MANAGER') {
-      return res.status(403).json({ error: 'Only administrators and managers can record a historical expense.' });
     }
     if (historicalEntry && nextExpenseDate >= todayYmd) {
       return res.status(400).json({ error: 'Choose a date earlier than today for a historical expense.' });
