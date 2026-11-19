@@ -18,7 +18,21 @@ export default function OperationsLive(){
  const paramsFor={page,limit:view==='delivered'?80:view==='reports'?100:50,branch_id:branch,period,from,to,search,status};
  const requestKey=JSON.stringify(view==='delivered'?[view,branch,period,from,to,search,page]:[view,branch,period,from,to,search,status,page]);
  const visibleOrders=ordersKey===requestKey?orders:[];
- const load=async()=>{if(!token)return;const hasOrderList=view==='queue'||view==='delivered';if(hasOrderList&&ordersKey!==requestKey)setOrdersLoading(true);try{const listRequest=hasOrderList?api.get('/operations/'+(view==='delivered'?'delivered':'queue'),{...authConfig(),params:paramsFor}):Promise.resolve(null);const[b,s,res]=await Promise.all([api.get('/operations/branches',authConfig()),api.get('/operations/summary',{...authConfig(),params:{branch_id:branch,limit:50}}),listRequest]);setBranches(b.data.branches||[]);setSummary(s.data);if(res){setOrders(res.data.orders||[]);setOrdersKey(requestKey);setTotal(res.data.total||0);setTotalPages(res.data.totalPages||1)}}catch(e:any){setError(e.response?.data?.error||'Could not load Operations data')}finally{if(hasOrderList)setOrdersLoading(false)}}
+ const loadSequence=useRef(0);
+ const load=async()=>{
+  if(!token)return;
+  const sequence=++loadSequence.current;
+  const hasOrderList=view==='queue'||view==='delivered';
+  if(hasOrderList&&ordersKey!==requestKey)setOrdersLoading(true);
+  try{
+   const listRequest=hasOrderList?api.get('/operations/'+(view==='delivered'?'delivered':'queue'),{...authConfig(),params:paramsFor}):Promise.resolve(null);
+   const[b,s,res]=await Promise.all([api.get('/operations/branches',authConfig()),api.get('/operations/summary',{...authConfig(),params:{branch_id:branch,limit:50}}),listRequest]);
+   if(sequence!==loadSequence.current)return;
+   setBranches(b.data.branches||[]);setSummary(s.data);
+   if(res){setOrders(res.data.orders||[]);setOrdersKey(requestKey);setTotal(res.data.total||0);setTotalPages(res.data.totalPages||1)}
+  }catch(e:any){if(sequence===loadSequence.current)setError(e.response?.data?.error||'Could not load Operations data')}
+  finally{if(sequence===loadSequence.current&&hasOrderList)setOrdersLoading(false)}
+ }
  useEffect(()=>{if(!messageBranch&&branches.length)setMessageBranch(String(branches[0].id))},[branches,messageBranch]);
  useEffect(()=>{if(!token)return;void load();const timer=setInterval(()=>void load(),20000);return()=>clearInterval(timer)},[token,view,branch,period,from,to,search,status,page]);
  useEffect(()=>{if(!token)return;if(view==='reports')api.get('/operations/ready-items',{...authConfig(),params:paramsFor}).then(r=>{setReady(r.data.items||[]);setItemSummary(r.data.summary?.top_items||[]);setTotal(r.data.total||0);setTotalPages(r.data.totalPages||1)}).catch(()=>setError('Could not load report'));if(view==='messages')api.get('/operations/messages',authConfig()).then(r=>setMessages(r.data.messages||[])).catch(()=>setError('Could not load messages'))},[token,view,branch,period,from,to,search,status,page]);
