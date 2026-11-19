@@ -2124,7 +2124,9 @@ export default function Orders() {
                         )}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground">
-                        <span className={isUnpaidOlderThanFiveDays(order) ? 'font-semibold text-red-600 dark:text-red-400' : ''}>
+                        <span className={getKampalaCalendarAge(order.created_at) === 0
+                          ? 'rounded bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-700 dark:bg-sky-950/60 dark:text-sky-300'
+                          : 'font-semibold text-red-600 dark:text-red-400'}>
                           {getDaysOld(order.created_at)}
                         </span>
                         {isOverdue(order) && (
