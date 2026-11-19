@@ -1012,6 +1012,7 @@ export default function NewOrder() {
   const cashAppliedPreview = Math.min(amountPaid, cashDueAfterCredit);
   const excessCreditPreview = Math.max(0, amountPaid - cashDueAfterCredit);
   const settledAmountPreview = creditAppliedPreview + cashAppliedPreview;
+  const missingPaymentAmount = paymentMethod !== 'ON_ACCOUNT' && total > 0 && settledAmountPreview <= 0;
   const balance = Math.max(0, total - settledAmountPreview);
   
   // For backward compatibility
@@ -1229,6 +1230,15 @@ export default function NewOrder() {
         variant: 'destructive',
         title: 'Validation Error',
         description: 'Please add items to the order',
+      });
+      return;
+    }
+
+    if (missingPaymentAmount) {
+      toast({
+        variant: 'destructive',
+        title: 'Payment amount required',
+        description: 'Enter the amount received or choose Paid (full). For a partial payment, enter the amount before creating the order.',
       });
       return;
     }
@@ -2364,7 +2374,7 @@ export default function NewOrder() {
               <Button
                 className="w-full h-12 text-base font-bold bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                 onClick={handleCreateOrder}
-                disabled={loading || !selectedCustomer || orderItems.length === 0 || (paymentStatus === 'PARTIAL' && settledAmountPreview <= 0) || (excessCreditPreview > 0 && !keepExcessAsCredit)}
+                disabled={loading || !selectedCustomer || orderItems.length === 0 || missingPaymentAmount || (paymentStatus === 'PARTIAL' && settledAmountPreview <= 0) || (excessCreditPreview > 0 && !keepExcessAsCredit)}
               >
                 {loading ? (
                   <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Creating order...</>
