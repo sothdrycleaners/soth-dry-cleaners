@@ -215,8 +215,8 @@ export const updateOperationsItem = async (req: AuthRequest, res: Response) => {
     const old = String(found.rows[0].order_status).toUpperCase();
     await client.query("SELECT set_config('app.operations_status_update','true',true)");
     if (ready && old !== 'READY') await client.query("UPDATE public.orders SET status='READY',updated_at=NOW() WHERE id=$1 AND tenant_id=app_current_tenant_id()", [found.rows[0].order_id]);
-    else if (!ready && old === 'READY') await client.query("UPDATE public.orders SET status='PROCESSING',updated_at=NOW() WHERE id=$1 AND tenant_id=app_current_tenant_id()", [found.rows[0].order_id]);
-    else if (!ready && ['PENDING'].includes(old)) await client.query("UPDATE public.orders SET status='PROCESSING',updated_at=NOW() WHERE id=$1 AND tenant_id=app_current_tenant_id()", [found.rows[0].order_id]);
+    else if (!ready && old === 'READY') await client.query("UPDATE public.orders SET status='processing',updated_at=NOW() WHERE id=$1 AND tenant_id=app_current_tenant_id()", [found.rows[0].order_id]);
+    else if (!ready && ['PENDING'].includes(old)) await client.query("UPDATE public.orders SET status='processing',updated_at=NOW() WHERE id=$1 AND tenant_id=app_current_tenant_id()", [found.rows[0].order_id]);
     await client.query('COMMIT');
     res.json({ success: true, order_ready: ready });
   } catch (error) { try { await client.query('ROLLBACK'); } catch {} console.error('Operations item update error:', error); res.status(500).json({ error: 'Unable to update item status' }); }
