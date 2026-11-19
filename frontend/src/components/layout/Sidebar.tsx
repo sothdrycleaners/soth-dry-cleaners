@@ -62,6 +62,7 @@ const secondaryNavigation = [
 const operationsNavigation = [
   { name: 'Operations Workspace', href: '/operations?view=dashboard', view: 'dashboard', icon: LayoutDashboard },
   { name: 'Work Queue', href: '/operations?view=queue', view: 'queue', icon: ClipboardList },
+  { name: 'Ready Orders', href: '/operations?view=ready', view: 'ready', icon: ClipboardCheck },
   { name: 'Messages', href: '/operations?view=messages', view: 'messages', icon: MessageSquare },
   { name: 'Reports', href: '/operations?view=reports', view: 'reports', icon: BarChart3 },
   { name: 'Delivered Items', href: '/operations?view=delivered', view: 'delivered', icon: PackageCheck },
