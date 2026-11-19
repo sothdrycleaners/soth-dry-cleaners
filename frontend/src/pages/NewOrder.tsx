@@ -2136,6 +2136,12 @@ export default function NewOrder() {
                         key={value}
                         type="button"
                         onClick={() => {
+                          if (paymentMethod === 'ON_ACCOUNT' && value !== 'ON_ACCOUNT') {
+                            // On Account has no cash payment. Require a fresh amount
+                            // when switching back to a payment method.
+                            setAmountPaid(0);
+                            setPaymentStatus('UNPAID');
+                          }
                           setPaymentMethod(value);
                           if (value === 'ON_ACCOUNT') {
                             setAmountPaid(0);
