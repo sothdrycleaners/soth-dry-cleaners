@@ -31,6 +31,7 @@ router.use(requireOperationsAccess as any);
 router.get('/summary', controller.getOperationsSummary as any);
 router.get('/branches', controller.getOperationsBranches as any);
 router.get('/queue', controller.getOperationsQueue as any);
+router.get('/ready-orders', controller.getOperationsReadyOrders as any);
 router.get('/ready-items', controller.getOperationsReadyItems as any);
 router.get('/delivered', controller.getOperationsDelivered as any);
 router.get('/messages', controller.getOperationsMessages as any);

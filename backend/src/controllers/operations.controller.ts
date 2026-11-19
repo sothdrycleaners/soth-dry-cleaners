@@ -35,34 +35,44 @@ function dateSql(req: AuthRequest, column: string, values: unknown[]) {
   }
   return '';
 }
-async function listOrders(req: AuthRequest, delivered = false) {
+async function listOrders(req: AuthRequest, mode: 'queue' | 'ready' | 'delivered' = 'queue') {
   const { page, limit, offset } = pageOptions(req);
   const values: unknown[] = [];
-  let where = delivered ? "upper(o.status::text)='DELIVERED'" : "upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')";
-  // Historical queue orders use their business date; delivered history is ordered and filtered by its latest status update.
-  const orderDateExpression = delivered
-    ? 'COALESCE(o.updated_at,o.recorded_at,o.created_at)'
-    : 'COALESCE(o.created_at,o.recorded_at)';
+  const delivered = mode === 'delivered';
+  const ready = mode === 'ready';
+  let where = delivered
+    ? "upper(o.status::text)='DELIVERED'"
+    : ready
+      ? "upper(o.status::text)='READY'"
+      : "upper(o.status::text) NOT IN ('READY','DELIVERED','CANCELLED')";
+  // FIFO queue ordering follows when the order entered the system. Ready and delivered lanes follow their latest status update.
+  const orderDateExpression = mode === 'queue'
+    ? 'COALESCE(o.recorded_at,o.created_at)'
+    : 'COALESCE(o.updated_at,o.recorded_at,o.created_at)';
   where += dateSql(req, orderDateExpression, values);
   const branchId = branchIdFor(req);
   if (branchId !== null) { values.push(branchId); where += ` AND o.branch_id=$${values.length}`; }
   const search = String(req.query.search || '').trim();
   if (search) { values.push(`%${search}%`); where += ` AND (o.order_number ILIKE $${values.length} OR c.name ILIKE $${values.length} OR b.name ILIKE $${values.length})`; }
-  const status = String(req.query.status || '');
-  if (status && status !== 'ALL' && status !== 'EXPRESS' && !delivered) {
+  const status = String(req.query.status || '').toUpperCase();
+  if (mode === 'queue' && status && status !== 'ALL' && status !== 'EXPRESS') {
     if (status === 'RECEIVED') {
       where += " AND upper(COALESCE(o.status::text,'PENDING')) IN ('PENDING','RECEIVED')";
-    } else if (['PROCESSING', 'READY'].includes(status)) {
-      values.push(status);
-      where += ` AND upper(o.status::text)=$${values.length}`;
+    } else if (status === 'PROCESSING') {
+      where += " AND upper(o.status::text)='PROCESSING'";
     }
   }
-  if (status === 'EXPRESS') where += " AND EXISTS(SELECT 1 FROM public.order_items ex WHERE ex.order_id=o.id AND ex.tenant_id=o.tenant_id AND upper(COALESCE(ex.service_type,''))='EXPRESS')";
+  if (mode === 'queue' && status === 'EXPRESS') where += " AND EXISTS(SELECT 1 FROM public.order_items ex WHERE ex.order_id=o.id AND ex.tenant_id=o.tenant_id AND upper(COALESCE(ex.service_type,''))='EXPRESS')";
   const count = await query(
     `SELECT count(*)::int total FROM public.orders o
      JOIN public.customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id LEFT JOIN public.branches b ON b.id=o.branch_id WHERE ${where}`, values
   );
   const total = Number(count.rows[0]?.total || 0);
+  const orderBy = mode === 'queue'
+    ? `is_express DESC,${orderDateExpression} ASC,o.id ASC`
+    : mode === 'ready'
+      ? `is_express DESC,${orderDateExpression} DESC,o.id DESC`
+      : `${orderDateExpression} DESC,o.id DESC`;
   const result = await query(
     `SELECT o.id,o.order_number,o.status order_status,o.notes order_note,
       COALESCE(bool_or(upper(COALESCE(oi.service_type,''))='EXPRESS'),FALSE) is_express,o.branch_id,b.name branch_name,
@@ -79,7 +89,7 @@ async function listOrders(req: AuthRequest, delivered = false) {
      LEFT JOIN public.price_items pi ON pi.id=oi.price_item_id AND pi.tenant_id=oi.tenant_id
      LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
      WHERE ${where} GROUP BY o.id,c.id,b.id,u.id
-     ORDER BY ${delivered ? '' : 'is_express DESC,'}${orderDateExpression} DESC,o.id DESC
+     ORDER BY ${orderBy}
      LIMIT $${values.length+1} OFFSET $${values.length+2}`,
     [...values, limit, offset]
   );
@@ -126,9 +136,9 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
        LEFT JOIN public.order_items oi ON oi.order_id=o.id AND oi.tenant_id=o.tenant_id
        LEFT JOIN public.price_items pi ON pi.id=oi.price_item_id AND pi.tenant_id=oi.tenant_id
        LEFT JOIN public.operations_item_status os ON os.order_item_id=oi.id AND os.tenant_id=oi.tenant_id
-       WHERE upper(o.status::text) NOT IN ('DELIVERED','CANCELLED')${branchClause}
+       WHERE upper(o.status::text) NOT IN ('READY','DELIVERED','CANCELLED')${branchClause}
        GROUP BY o.id,c.id,b.id
-       HAVING BOOL_OR(os.status='READY' AND os.updated_by IS NOT NULL)
+       HAVING BOOL_OR(os.status IN ('PROCESSING','READY') AND os.updated_by IS NOT NULL)
           AND NOT BOOL_OR(upper(COALESCE(oi.service_type,''))='EXPRESS')
        ORDER BY MAX(os.updated_at) DESC NULLS LAST,o.id DESC
        LIMIT 40`,
@@ -142,8 +152,13 @@ export const getOperationsSummary = async (req: AuthRequest, res: Response) => {
       in_progress_orders: startedOrders.rows,
     });
   } catch (error) { console.error('Operations summary error:', error); res.status(500).json({ error: 'Unable to load Operations summary' }); }
-};export const getOperationsDelivered = async (req: AuthRequest, res: Response) => {
-  try { res.json(await listOrders(req, true)); }
+};
+export const getOperationsReadyOrders = async (req: AuthRequest, res: Response) => {
+  try { res.json(await listOrders(req, 'ready')); }
+  catch (error) { console.error('Operations ready orders error:', error); res.status(500).json({ error: 'Unable to load ready orders' }); }
+};
+export const getOperationsDelivered = async (req: AuthRequest, res: Response) => {
+  try { res.json(await listOrders(req, 'delivered')); }
   catch (error) { console.error('Operations delivered error:', error); res.status(500).json({ error: 'Unable to load delivered orders' }); }
 };
 export const getOperationsReadyItems = async (req: AuthRequest, res: Response) => {
