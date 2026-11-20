@@ -813,7 +813,7 @@ const Expenses = () => {
       {/* Expenses Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto lg:block">
             <table className="w-full min-w-[1050px]">
               <thead className="bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700">
                 <tr>
@@ -938,6 +938,66 @@ const Expenses = () => {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="grid gap-3 p-3 lg:hidden">
+            {loading ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">Loading expenses…</div>
+            ) : expenses.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">No expenses found</div>
+            ) : expenses.map((expense) => (
+              <article
+                key={`mobile-${expense.id}`}
+                className="min-w-0 rounded-lg border bg-card p-3 shadow-sm transition-colors hover:bg-muted/40"
+                onClick={() => { setSelectedExpense(expense); setShowDetailsDialog(true); }}
+              >
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Badge style={{ backgroundColor: expense.category_color }} className="max-w-full truncate text-white">
+                      {expense.category_name}
+                    </Badge>
+                    <p className="mt-1 break-words text-sm font-medium">{formatExpenseDate(expense.expense_date)}</p>
+                  </div>
+                  <p className="shrink-0 text-right font-semibold">{formatUGX(expense.amount)}</p>
+                </div>
+                <p className="mt-3 break-words text-sm text-muted-foreground">{expense.description || '—'}</p>
+                <div className="mt-3 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 border-t pt-3 text-sm">
+                  <div className="min-w-0">
+                    <span className="block text-xs text-muted-foreground">Method</span>
+                    <span className="block break-words">{formatPaymentMethod(expense.payment_method)}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-xs text-muted-foreground">Status</span>
+                    <span className="mt-0.5 block">{getStatusBadge(expense.status)}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-xs text-muted-foreground">Branch</span>
+                    {expense.branch_name ? (
+                      <span title={expense.branch_name} className="mt-0.5 inline-block max-w-full break-words rounded-full border px-2 py-0.5 text-xs font-medium" style={{ color: getBranchColor(expense), borderColor: `${getBranchColor(expense)}66`, backgroundColor: `${getBranchColor(expense)}1A` }}>{expense.branch_name}</span>
+                    ) : <span>—</span>}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-xs text-muted-foreground">Recorded by</span>
+                    <span className="block break-words">{expense.recorded_by_name || '—'}</span>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                  <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setSelectedExpense(expense); setShowDetailsDialog(true); }}>
+                    <Eye className="mr-1.5 h-4 w-4" />Details
+                  </Button>
+                  {canChangeStatusFromList(expense, 'APPROVED') && (
+                    <Button size="sm" className="bg-green-600 text-white hover:bg-green-700" disabled={!!actionLoading} onClick={(e) => { e.stopPropagation(); handleApprove(expense.id, 'APPROVED'); }}>
+                      {isBusy(expense.id, 'APPROVED') ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="mr-1.5 h-4 w-4" />}Approve
+                    </Button>
+                  )}
+                  {canChangeStatusFromList(expense, 'REJECTED') && (
+                    <Button size="sm" variant="destructive" disabled={!!actionLoading} onClick={(e) => { e.stopPropagation(); requestReject(expense.id); }}>
+                      {isBusy(expense.id, 'REJECTED') ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="mr-1.5 h-4 w-4" />}Reject
+                    </Button>
+                  )}
+                </div>
+              </article>
+            ))}
           </div>
 
           {/* Pagination */}

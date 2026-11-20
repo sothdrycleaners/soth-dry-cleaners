@@ -927,7 +927,7 @@ const UserManagement = () => {
                 ) : users.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">No users found</div>
                 ) : (
-                  <div className="w-full">
+                  <div className="hidden w-full lg:block">
                   <Table className="w-full table-fixed">
                     <TableHeader>
                       <TableRow>
@@ -1111,6 +1111,71 @@ const UserManagement = () => {
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
+                  <div className="grid gap-3 lg:hidden">
+                    {users.map((user) => (
+                      <article key={`mobile-${user.id}`} className="min-w-0 rounded-lg border bg-card p-3 shadow-sm">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <Avatar className="h-10 w-10 shrink-0">
+                            <AvatarImage src={resolveProfilePictureUrl(user, API_ORIGIN)} alt={user.full_name} />
+                            <AvatarFallback>
+                              {user.full_name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <p className="break-words font-semibold leading-5">{user.full_name}</p>
+                            <p className="mt-0.5 break-all text-sm text-muted-foreground">{user.email}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <Badge className={getRoleBadgeColor(user.role)}>{user.role}</Badge>
+                              {getStatusBadge(user.status)}
+                            </div>
+                          </div>
+                        </div>
+                        {multiBranch && (
+                          <div className="mt-3 min-w-0">
+                            <span className="mb-1 block text-xs font-medium text-muted-foreground">Branch</span>
+                            {user.role === 'ADMIN' ? (
+                              <span className="text-sm text-muted-foreground">Unassigned</span>
+                            ) : (
+                              <Select
+                                value={user.branch_id ? String(user.branch_id) : 'none'}
+                                onValueChange={(value) => handleUpdateBranch(user, value)}
+                                disabled={updatingBranchUserId === user.id || (isManager && !isAdmin && user.role !== 'DESKTOP_AGENT')}
+                              >
+                                <SelectTrigger className="h-9 w-full min-w-0">
+                                  <SelectValue placeholder="Unassigned" />
+                                  {updatingBranchUserId === user.id && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Unassigned</SelectItem>
+                                  {branchOptions.map((branch) => <SelectItem key={branch.id} value={String(branch.id)}>{branch.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                        )}
+                        <div className="mt-3 flex flex-wrap items-center gap-1 border-t pt-2">
+                          <Button variant="outline" size="sm" onClick={() => { setSelectedUser(user); setShowDetailsDialog(true); }}>
+                            <Eye className="mr-1.5 h-4 w-4" />Details
+                          </Button>
+                          {isAdmin && <Button variant="ghost" size="icon" onClick={() => openEditUser(user)} title="Edit user" aria-label="Edit user"><Pencil className="h-4 w-4" /></Button>}
+                          <Button variant="ghost" size="icon" onClick={() => { setSelectedUser(user); fetchLoginHistory(user.id); setShowLoginHistoryDialog(true); }} title="Login history" aria-label="Login history"><History className="h-4 w-4" /></Button>
+                          {user.status === 'PENDING' && (isAdmin || user.role === 'DESKTOP_AGENT') && (
+                            <>
+                              <Button variant="ghost" size="icon" className="text-green-600" onClick={() => { setSelectedUser(user); setShowApproveDialog(true); }} title="Approve" aria-label="Approve user"><UserCheck className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" className="text-red-600" onClick={() => { setSelectedUser(user); setShowRejectDialog(true); }} title="Reject" aria-label="Reject user"><UserX className="h-4 w-4" /></Button>
+                            </>
+                          )}
+                          {user.status === 'ACTIVE' && user.role !== 'ADMIN' && (isAdmin || user.role === 'DESKTOP_AGENT') && <Button variant="ghost" size="icon" className="text-orange-600" onClick={() => { setSelectedUser(user); setShowSuspendDialog(true); }} title="Suspend" aria-label="Suspend user"><Ban className="h-4 w-4" /></Button>}
+                          {user.status === 'SUSPENDED' && (isAdmin || user.role === 'DESKTOP_AGENT') && (
+                            <Button variant="ghost" size="icon" className="text-blue-600" disabled={userActionPending === `activate-${user.id}`} onClick={() => handleActivateUser(user)} title="Activate" aria-label="Activate user">
+                              {userActionPending === `activate-${user.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                            </Button>
+                          )}
+                          {isAdmin && user.role !== 'ADMIN' && <Button variant="ghost" size="icon" className="text-red-600" onClick={() => { setSelectedUser(user); setShowDeleteDialog(true); }} title="Delete" aria-label="Delete user"><Trash2 className="h-4 w-4" /></Button>}
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 )}
                 {totalPages > 1 && (
@@ -1331,23 +1396,23 @@ const UserManagement = () => {
                     <Users className="h-4 w-4" />
                     Contact Information
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/50 p-4 rounded-lg">
-                    <div>
+                  <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/50 p-4 rounded-lg">
+                    <div className="min-w-0">
                       <label className="text-sm font-medium text-muted-foreground">Login email</label>
                       <p className="text-base mt-1 break-all">{selectedUser.email}</p>
                       <p className="text-xs text-muted-foreground mt-1">This is the address they use to sign in.</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="text-sm font-medium text-muted-foreground">Phone Number</label>
                       <p className="text-base mt-1 break-all">{selectedUser.phone || '—'}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="text-sm font-medium text-muted-foreground">Branch</label>
-                      <p className="text-base mt-1">{selectedUser.branch_name || 'Unassigned'}</p>
+                      <p className="mt-1 break-words text-base">{selectedUser.branch_name || 'Unassigned'}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="text-sm font-medium text-muted-foreground">Role</label>
-                      <p className="text-base mt-1">{selectedUser.role.replace('_', ' ')}</p>
+                      <p className="mt-1 break-words text-base">{selectedUser.role.replace('_', ' ')}</p>
                     </div>
                   </div>
                 </div>
