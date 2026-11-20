@@ -602,8 +602,8 @@ export const updateUserRole = async (req: AuthRequest, res: Response) => {
     // Update role
     const result = await query(
       `UPDATE users 
-       SET role = $1,
-           branch_id = CASE WHEN $1::text = 'ADMIN' THEN NULL ELSE branch_id END,
+       SET role = $1::user_role,
+           branch_id = CASE WHEN $1::user_role = 'ADMIN'::user_role THEN NULL ELSE branch_id END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
        RETURNING id, email, full_name, role, status`,
