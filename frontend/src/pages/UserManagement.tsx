@@ -927,6 +927,7 @@ const UserManagement = () => {
                 ) : users.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">No users found</div>
                 ) : (
+                  <>
                   <div className="hidden w-full lg:block">
                   <Table className="w-full table-fixed">
                     <TableHeader>
@@ -1177,6 +1178,7 @@ const UserManagement = () => {
                       </article>
                     ))}
                   </div>
+                  </>
                 )}
                 {totalPages > 1 && (
                   <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
