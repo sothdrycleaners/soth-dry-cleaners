@@ -2259,9 +2259,16 @@ export default function NewOrder() {
               )}
               {settledAmountPreview > 0 && (
                 <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs">
+                  <span className="text-muted-foreground">Order total</span><span className="text-right font-medium">{formatUGX(total)}</span>
                   <span className="text-muted-foreground">Cash applied to order</span><span className="text-right font-medium">{formatUGX(cashAppliedPreview)}</span>
                   <span className="text-muted-foreground">Customer credit applied</span><span className="text-right font-medium">{formatUGX(creditAppliedPreview)}</span>
                   {excessCreditPreview > 0 && <><span className="text-muted-foreground">New account credit</span><span className="text-right font-semibold text-emerald-700">{formatUGX(excessCreditPreview)}</span></>}
+                  {balance > 0 ? (
+                    <><span className="border-t pt-2 font-semibold text-amber-700 dark:text-amber-300">Balance due</span><span className="border-t pt-2 text-right font-semibold text-amber-700 dark:text-amber-300">{formatUGX(balance)}</span></>
+                  ) : (
+                    <><span className="border-t pt-2 font-semibold text-emerald-700 dark:text-emerald-300">Balance due</span><span className="border-t pt-2 text-right font-semibold text-emerald-700 dark:text-emerald-300">{formatUGX(0)}</span></>
+                  )}
+                  {applyCustomerCredit && <><span className="text-muted-foreground">Customer credit remaining</span><span className="text-right font-medium">{formatUGX(Math.max(0, availableCustomerCredit - creditAppliedPreview))}</span></>}
                 </div>
               )}
 
