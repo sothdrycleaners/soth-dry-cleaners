@@ -968,7 +968,7 @@ const Expenses = () => {
                   </div>
                   <div className="min-w-0">
                     <span className="block text-xs text-muted-foreground">Status</span>
-                    <span className="mt-0.5 block">{getStatusBadge(expense.status)}</span>
+                    <Badge className={`${getStatusColor(expense.status)} mt-0.5`}>{expense.status}</Badge>
                   </div>
                   <div className="min-w-0">
                     <span className="block text-xs text-muted-foreground">Branch</span>
