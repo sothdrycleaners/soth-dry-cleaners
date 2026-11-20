@@ -130,7 +130,7 @@ interface Statistics {
 }
 
 const UserManagement = () => {
-  const { token, isAdmin, isManager } = useAuth();
+  const { token, isAdmin, isManager, isSystemAdmin } = useAuth();
   const canManageUsers = isAdmin || isManager;
   const { toast } = useToast();
   
@@ -635,6 +635,10 @@ const UserManagement = () => {
 
   const handleUpdateRole = async () => {
     if (!selectedUser || !newRole || userActionPendingRef.current) return;
+    if (!isSystemAdmin && (selectedUser.role === 'ADMIN' || newRole === 'ADMIN')) {
+      toast({ title: 'Super administrator required', description: 'Only the super administrator can change administrator roles or assign the Administrator role.', variant: 'destructive' });
+      return;
+    }
     userActionPendingRef.current = true;
     setUserActionPending('role');
     
@@ -1455,18 +1459,27 @@ const UserManagement = () => {
                   <div className="rounded-lg border p-4">
                     <h4 className="font-semibold">Primary role</h4>
                     <p className="mt-1 text-sm text-muted-foreground">Change this person?s main job on the same account. Account history and sign-in details stay intact.</p>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <Select value={newRole || selectedUser.role} onValueChange={setNewRole}>
-                        <SelectTrigger className="sm:max-w-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ADMIN">Administrator</SelectItem>
-                          <SelectItem value="MANAGER">Manager</SelectItem>
-                          <SelectItem value="DESKTOP_AGENT">Desktop Agent</SelectItem>
-                          <SelectItem value="OPERATIONS">Operations</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Button size="sm" disabled={!newRole || newRole === selectedUser.role || userActionPending === 'role'} onClick={() => void handleUpdateRole()}>Save role</Button>
-                    </div>
+                    {!isSystemAdmin && selectedUser.role === 'ADMIN' ? (
+                      <div className="mt-3 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                        Administrator role changes are reserved for the super administrator.
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                        <Select value={newRole || selectedUser.role} onValueChange={setNewRole}>
+                          <SelectTrigger className="sm:max-w-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {isSystemAdmin && <SelectItem value="ADMIN">Administrator</SelectItem>}
+                            <SelectItem value="MANAGER">Manager</SelectItem>
+                            <SelectItem value="DESKTOP_AGENT">Desktop Agent</SelectItem>
+                            <SelectItem value="OPERATIONS">Operations</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button size="sm" disabled={!newRole || newRole === selectedUser.role || (!isSystemAdmin && newRole === 'ADMIN') || userActionPending === 'role'} onClick={() => void handleUpdateRole()}>Save role</Button>
+                      </div>
+                    )}
+                    {!isSystemAdmin && selectedUser.role !== 'ADMIN' && (
+                      <p className="mt-2 text-xs text-muted-foreground">Only the super administrator can assign the Administrator role.</p>
+                    )}
                   </div>
                 )}
 

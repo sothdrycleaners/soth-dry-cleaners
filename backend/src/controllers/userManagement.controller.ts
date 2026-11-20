@@ -589,6 +589,12 @@ export const updateUserRole = async (req: AuthRequest, res: Response) => {
     const user = userCheck.rows[0];
     const oldRole = user.role;
 
+    if (!req.user?.is_system_admin && (oldRole === UserRole.ADMIN || role === UserRole.ADMIN)) {
+      return res.status(403).json({
+        error: 'Only the super administrator can change administrator roles or assign the Administrator role.',
+      });
+    }
+
     const visibilityBlock = enforceTargetVisibility(req, user.email);
     if (visibilityBlock) {
       return res.status(visibilityBlock.status).json(visibilityBlock.payload);
